@@ -22,8 +22,11 @@ func NewRootCmd() *cobra.Command {
 
 	kubeFlags.AddFlags(root.PersistentFlags())
 
-	// Register subcommands here as the plugin grows.
-	// root.AddCommand(newFooCmd(kubeFlags))
+	root.AddCommand(
+		newContextsCmd(kubeFlags),
+		newGetCmd(kubeFlags),
+		newStatusCmd(kubeFlags),
+	)
 
 	return root
 }
