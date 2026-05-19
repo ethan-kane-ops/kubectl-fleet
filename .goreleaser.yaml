@@ -24,9 +24,9 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.ShortCommit}}
-      - -X main.date={{.Date}}
+      - -X github.com/ethan-kane-ops/kubectl-fleet/internal/buildinfo.Version=v{{.Version}}
+      - -X github.com/ethan-kane-ops/kubectl-fleet/internal/buildinfo.Commit={{.ShortCommit}}
+      - -X github.com/ethan-kane-ops/kubectl-fleet/internal/buildinfo.Date={{.Date}}
 
 archives:
   - id: kubectl-fleet
