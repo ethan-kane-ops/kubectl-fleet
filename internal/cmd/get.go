@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,7 +13,14 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/printers"
 )
+
+type fetchedResource struct {
+	items      []unstructured.Unstructured
+	namespaced bool
+	resource   string
+}
 
 func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
@@ -61,31 +67,26 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			}
 
 			results := fleet.Run(cmd.Context(), refs, parallelism,
-				func(ctx context.Context, r kubeconfig.ContextRef) ([]unstructured.Unstructured, error) {
+				func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
 					return getOne(ctx, kubeFlags, r, kind, name, ns, allNamespaces, labelSelector)
 				})
 
-			tbl := &output.Table{
-				Headers:     []string{"CONTEXT", "NAMESPACE", "NAME", "AGE"},
-				WideHeaders: []string{"KIND", "API_VERSION", "ERROR"},
-			}
+			schema, namespaced := schemaForResults(kind, results)
+			tbl := buildTable(schema, namespaced)
 			for _, res := range results {
 				if res.Err != nil {
-					tbl.Append(
-						[]string{res.Context, "", "<error>", ""},
-						[]string{"", "", res.Err.Error()},
-					)
+					appendErrorRow(tbl, res.Context, namespaced, schema, res.Err)
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
 					continue
 				}
-				if len(res.Value) == 0 {
-					continue
-				}
-				for _, u := range res.Value {
-					tbl.Append(
-						[]string{res.Context, u.GetNamespace(), u.GetName(), ageOf(u.GetCreationTimestamp())},
-						[]string{u.GetKind(), u.GetAPIVersion(), ""},
-					)
+				for i := range res.Value.items {
+					u := &res.Value.items[i]
+					cols, wide := schema.Row(u)
+					prefix := []string{res.Context}
+					if namespaced {
+						prefix = append(prefix, u.GetNamespace())
+					}
+					tbl.Append(append(prefix, cols...), append(wide, ""))
 				}
 			}
 			return output.Print(cmd.OutOrStdout(), tbl, f)
@@ -108,22 +109,84 @@ func defaultNamespaceFromContexts(refs []kubeconfig.ContextRef) string {
 	return "default"
 }
 
-func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, kind, name, ns string, allNS bool, selector string) ([]unstructured.Unstructured, error) {
+// schemaForResults picks a per-kind schema based on the resolved GVR resource
+// from the first successful cluster. Falls back to the user-supplied alias,
+// then to printers.Generic. When no cluster succeeded the per-kind schema's
+// own Namespaced declaration drives whether the NAMESPACE column renders.
+func schemaForResults(kind string, results []fleet.ClusterResult[fetchedResource]) (printers.Schema, bool) {
+	var resource string
+	var liveNamespaced bool
+	var anySuccess bool
+	for _, r := range results {
+		if r.Err == nil && r.Value.resource != "" {
+			resource = r.Value.resource
+			liveNamespaced = r.Value.namespaced
+			anySuccess = true
+			break
+		}
+	}
+	if resource != "" {
+		if s, ok := printers.For(resource); ok {
+			return s, liveNamespaced
+		}
+	}
+	if s, ok := printers.For(kind); ok {
+		if anySuccess {
+			return s, liveNamespaced
+		}
+		return s, s.Namespaced
+	}
+	g := printers.Generic()
+	if anySuccess {
+		return g, liveNamespaced
+	}
+	return g, g.Namespaced
+}
+
+func buildTable(s printers.Schema, namespaced bool) *output.Table {
+	headers := []string{"CONTEXT"}
+	if namespaced {
+		headers = append(headers, "NAMESPACE")
+	}
+	headers = append(headers, s.Headers...)
+	wide := append([]string{}, s.WideHeaders...)
+	wide = append(wide, "ERROR")
+	return &output.Table{Headers: headers, WideHeaders: wide}
+}
+
+func appendErrorRow(tbl *output.Table, ctx string, namespaced bool, s printers.Schema, err error) {
+	row := []string{ctx}
+	if namespaced {
+		row = append(row, "")
+	}
+	// First per-kind column holds "<error>" so the default table view stays
+	// informative without forcing -o wide.
+	for i := range s.Headers {
+		if i == 0 {
+			row = append(row, "<error>")
+		} else {
+			row = append(row, "")
+		}
+	}
+	wide := make([]string, len(s.WideHeaders))
+	wide = append(wide, err.Error())
+	tbl.Append(row, wide)
+}
+
+func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, kind, name, ns string, allNS bool, selector string) (fetchedResource, error) {
 	restCfg, err := kubeconfig.RESTConfigFor(kubeFlags, r.Name)
 	if err != nil {
-		return nil, err
+		return fetchedResource{}, err
 	}
 	clients, err := k8s.New(restCfg)
 	if err != nil {
-		return nil, err
+		return fetchedResource{}, err
 	}
 	gvr, namespaced, err := k8s.ResolveGVR(clients.Discovery, kind)
 	if err != nil {
-		return nil, err
+		return fetchedResource{}, err
 	}
-	if !namespaced {
-		ns = ""
-	}
+	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource}
 	if !namespaced || allNS {
 		ns = ""
 	}
@@ -131,31 +194,15 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 	if name != "" {
 		u, err := clients.Dynamic.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("get %s/%s: %w", gvr.Resource, name, err)
+			return out, fmt.Errorf("get %s/%s: %w", gvr.Resource, name, err)
 		}
-		return []unstructured.Unstructured{*u}, nil
+		out.items = []unstructured.Unstructured{*u}
+		return out, nil
 	}
 	list, err := clients.Dynamic.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
-		return nil, fmt.Errorf("list %s: %w", gvr.Resource, err)
+		return out, fmt.Errorf("list %s: %w", gvr.Resource, err)
 	}
-	return list.Items, nil
+	out.items = list.Items
+	return out, nil
 }
-
-func ageOf(ts metav1.Time) string {
-	if ts.IsZero() {
-		return ""
-	}
-	d := time.Since(ts.Time)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
-}
-
