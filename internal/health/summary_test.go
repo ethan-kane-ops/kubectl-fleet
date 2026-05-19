@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,7 +45,7 @@ func TestSummarize(t *testing.T) {
 		pod("noisy", "f", corev1.PodRunning, true),
 		pod("noisy", "g", corev1.PodFailed, false),
 	)
-	s, err := Summarize(context.Background(), cs, nil)
+	s, err := Summarize(context.Background(), cs, nil, Options{})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -67,11 +68,60 @@ func TestSummarize(t *testing.T) {
 
 func TestSummarizeEmptyCluster(t *testing.T) {
 	cs := fake.NewSimpleClientset()
-	s, err := Summarize(context.Background(), cs, nil)
+	s, err := Summarize(context.Background(), cs, nil, Options{})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
 	if s.NodesTotal != 0 || s.PodsTotal != 0 {
 		t.Errorf("expected zeroes, got %+v", s)
+	}
+}
+
+func podWithRestart(ns, name string, terminatedAt time.Time) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:         "c",
+				RestartCount: 1,
+				LastTerminationState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						FinishedAt: metav1.NewTime(terminatedAt),
+						Reason:     "Error",
+					},
+				},
+			}},
+		},
+	}
+}
+
+func TestSummarize_PodsRestartedInWindow(t *testing.T) {
+	now := time.Now()
+	cs := fake.NewSimpleClientset(
+		podWithRestart("default", "recent-1", now.Add(-2*time.Minute)),
+		podWithRestart("default", "recent-2", now.Add(-4*time.Minute)),
+		podWithRestart("default", "old-1", now.Add(-20*time.Minute)),
+		pod("default", "no-restart", corev1.PodRunning, false),
+	)
+	s, err := Summarize(context.Background(), cs, nil, Options{Since: 5 * time.Minute})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if s.PodsRestartedInWindow != 2 {
+		t.Errorf("PodsRestartedInWindow = %d want 2", s.PodsRestartedInWindow)
+	}
+}
+
+func TestSummarize_WindowDisabled(t *testing.T) {
+	cs := fake.NewSimpleClientset(
+		podWithRestart("default", "recent", time.Now().Add(-1*time.Minute)),
+	)
+	s, err := Summarize(context.Background(), cs, nil, Options{})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if s.PodsRestartedInWindow != 0 {
+		t.Errorf("PodsRestartedInWindow = %d want 0 (window disabled)", s.PodsRestartedInWindow)
 	}
 }

@@ -21,6 +21,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		timeout     time.Duration
 		parallelism int
 		outputFlag  string
+		noHeaders   bool
 	)
 	c := &cobra.Command{
 		Use:   "contexts",
@@ -41,6 +42,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			tbl := &output.Table{
 				Headers:     []string{"CONTEXT", "CLUSTER", "NAMESPACE", "AUTH"},
 				WideHeaders: []string{"REACHABLE", "VERSION", "LATENCY", "ERROR"},
+				NoHeaders:   noHeaders,
 			}
 
 			var probes []fleet.ClusterResult[reach]
@@ -74,7 +76,8 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().BoolVar(&probe, "check", false, "probe each context's /version endpoint")
 	c.Flags().DurationVar(&timeout, "timeout", 5*time.Second, "per-context probe timeout")
 	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel probes (0=unbounded)")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml")
+	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
+	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	return c
 }
 
