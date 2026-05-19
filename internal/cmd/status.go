@@ -22,6 +22,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		parallelism int
 		outputFlag  string
 		since       time.Duration
+		noHeaders   bool
 	)
 	c := &cobra.Command{
 		Use:   "status",
@@ -53,7 +54,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				headers = append(headers, "RESTARTS_"+since.String())
 			}
 			wideHeaders := []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"}
-			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders}
+			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: noHeaders}
 
 			for _, res := range results {
 				if res.Err != nil {
@@ -88,8 +89,9 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	}
 	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
 	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel cluster calls (0=unbounded)")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml")
+	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().DurationVar(&since, "since", 0, "if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)")
+	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	return c
 }
 

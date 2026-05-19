@@ -19,6 +19,11 @@ const (
 	FormatJSON  Format = "json"
 	FormatYAML  Format = "yaml"
 	FormatWide  Format = "wide"
+	// FormatName prints one identifier per line composed of CONTEXT, optional
+	// NAMESPACE, and NAME columns joined by "/". Designed for pipe-into-xargs
+	// scripting. When CONTEXT and NAMESPACE columns are absent the first
+	// non-empty column is used.
+	FormatName Format = "name"
 )
 
 // ParseFormat returns Format for a `-o` string. Empty defaults to table.
@@ -32,6 +37,8 @@ func ParseFormat(s string) (Format, error) {
 		return FormatJSON, nil
 	case "yaml":
 		return FormatYAML, nil
+	case "name":
+		return FormatName, nil
 	default:
 		return "", fmt.Errorf("unknown output format %q", s)
 	}
@@ -44,6 +51,9 @@ type Table struct {
 	Rows        [][]string
 	WideHeaders []string
 	WideRows    [][]string
+	// NoHeaders suppresses the leading header row in table/wide output.
+	// Has no effect on json/yaml/name formats.
+	NoHeaders bool
 }
 
 // Append a row. wide may be nil if the table has no wide columns.
@@ -65,18 +75,22 @@ func Print(w io.Writer, t *Table, f Format) error {
 		return printJSON(w, toObjects(t, true))
 	case FormatYAML:
 		return printYAML(w, toObjects(t, true))
+	case FormatName:
+		return printName(w, t)
 	}
 	return fmt.Errorf("unknown format %q", f)
 }
 
 func printTable(w io.Writer, t *Table, wide bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
-	headers := append([]string{}, t.Headers...)
-	if wide {
-		headers = append(headers, t.WideHeaders...)
-	}
-	if _, err := fmt.Fprintln(tw, strings.Join(headers, "\t")); err != nil {
-		return err
+	if !t.NoHeaders {
+		headers := append([]string{}, t.Headers...)
+		if wide {
+			headers = append(headers, t.WideHeaders...)
+		}
+		if _, err := fmt.Fprintln(tw, strings.Join(headers, "\t")); err != nil {
+			return err
+		}
 	}
 	for i, r := range t.Rows {
 		cols := append([]string{}, r...)
@@ -88,6 +102,52 @@ func printTable(w io.Writer, t *Table, wide bool) error {
 		}
 	}
 	return tw.Flush()
+}
+
+// printName emits one identifier per line. The identifier is built from the
+// CONTEXT, NAMESPACE (if non-empty), and NAME columns when present, joined
+// by "/". If NAME is absent, the first non-empty regular column is used.
+// Rows whose composed identifier is empty are skipped.
+func printName(w io.Writer, t *Table) error {
+	ctxIdx := indexOf(t.Headers, "CONTEXT")
+	nsIdx := indexOf(t.Headers, "NAMESPACE")
+	nameIdx := indexOf(t.Headers, "NAME")
+	for _, r := range t.Rows {
+		var parts []string
+		if ctxIdx >= 0 && ctxIdx < len(r) && r[ctxIdx] != "" {
+			parts = append(parts, r[ctxIdx])
+		}
+		if nsIdx >= 0 && nsIdx < len(r) && r[nsIdx] != "" {
+			parts = append(parts, r[nsIdx])
+		}
+		switch {
+		case nameIdx >= 0 && nameIdx < len(r) && r[nameIdx] != "":
+			parts = append(parts, r[nameIdx])
+		case len(parts) == 0:
+			for _, v := range r {
+				if v != "" {
+					parts = append(parts, v)
+					break
+				}
+			}
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		if _, err := fmt.Fprintln(w, strings.Join(parts, "/")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func indexOf(headers []string, name string) int {
+	for i, h := range headers {
+		if h == name {
+			return i
+		}
+	}
+	return -1
 }
 
 func toObjects(t *Table, includeWide bool) []map[string]string {

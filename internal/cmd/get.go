@@ -29,6 +29,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		labelSelector string
 		allNamespaces bool
 		outputFlag    string
+		noHeaders     bool
 	)
 	c := &cobra.Command{
 		Use:   "get <kind> [name]",
@@ -73,6 +74,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 
 			schema, namespaced := schemaForResults(kind, results)
 			tbl := buildTable(schema, namespaced)
+			tbl.NoHeaders = noHeaders
 			for _, res := range results {
 				if res.Err != nil {
 					appendErrorRow(tbl, res.Context, namespaced, schema, res.Err)
@@ -96,7 +98,8 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel cluster calls (0=unbounded)")
 	c.Flags().StringVarP(&labelSelector, "selector", "l", "", "label selector")
 	c.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "query across all namespaces")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml")
+	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
+	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	return c
 }
 

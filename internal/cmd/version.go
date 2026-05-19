@@ -21,6 +21,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		filter      string
 		parallelism int
 		outputFlag  string
+		noHeaders   bool
 	)
 	c := &cobra.Command{
 		Use:   "version",
@@ -33,6 +34,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			tbl := &output.Table{
 				Headers:     []string{"CONTEXT", "COMPONENT", "VERSION"},
 				WideHeaders: []string{"GIT_COMMIT", "BUILD_DATE", "PLATFORM", "ERROR"},
+				NoHeaders:   noHeaders,
 			}
 			tbl.Append(clientRow())
 
@@ -78,7 +80,8 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().BoolVar(&clientOnly, "client", false, "show client version only, skip cluster probes")
 	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
 	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel cluster calls (0=unbounded)")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml")
+	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
+	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	return c
 }
 

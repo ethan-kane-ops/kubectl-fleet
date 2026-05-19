@@ -99,3 +99,88 @@ func TestPrintEmpty(t *testing.T) {
 		t.Errorf("headers missing on empty table: %q", buf.String())
 	}
 }
+
+func TestParseFormatName(t *testing.T) {
+	got, err := ParseFormat("name")
+	if err != nil {
+		t.Fatalf("name: %v", err)
+	}
+	if got != FormatName {
+		t.Errorf("name parsed to %q want %q", got, FormatName)
+	}
+}
+
+func TestPrintName_contextNamespaceName(t *testing.T) {
+	tbl := &Table{Headers: []string{"CONTEXT", "NAMESPACE", "NAME", "AGE"}}
+	tbl.Append([]string{"prod", "payments", "api-1", "5h"}, nil)
+	tbl.Append([]string{"prod", "payments", "db-1", "5h"}, nil)
+	tbl.Append([]string{"dev", "default", "foo", "1m"}, nil)
+	var buf bytes.Buffer
+	if err := Print(&buf, tbl, FormatName); err != nil {
+		t.Fatalf("Print: %v", err)
+	}
+	want := "prod/payments/api-1\nprod/payments/db-1\ndev/default/foo\n"
+	if buf.String() != want {
+		t.Errorf("name output =\n%qwant\n%q", buf.String(), want)
+	}
+}
+
+func TestPrintName_clusterScopedNoNamespace(t *testing.T) {
+	tbl := &Table{Headers: []string{"CONTEXT", "NAME", "STATUS"}}
+	tbl.Append([]string{"prod", "node-1", "Ready"}, nil)
+	tbl.Append([]string{"dev", "node-2", "NotReady"}, nil)
+	var buf bytes.Buffer
+	if err := Print(&buf, tbl, FormatName); err != nil {
+		t.Fatalf("Print: %v", err)
+	}
+	want := "prod/node-1\ndev/node-2\n"
+	if buf.String() != want {
+		t.Errorf("name output =\n%qwant\n%q", buf.String(), want)
+	}
+}
+
+func TestPrintName_skipEmptyNamespace(t *testing.T) {
+	tbl := &Table{Headers: []string{"CONTEXT", "NAMESPACE", "NAME"}}
+	tbl.Append([]string{"prod", "", "cluster-role-x"}, nil)
+	tbl.Append([]string{"prod", "default", "pod-y"}, nil)
+	var buf bytes.Buffer
+	if err := Print(&buf, tbl, FormatName); err != nil {
+		t.Fatalf("Print: %v", err)
+	}
+	want := "prod/cluster-role-x\nprod/default/pod-y\n"
+	if buf.String() != want {
+		t.Errorf("name output =\n%qwant\n%q", buf.String(), want)
+	}
+}
+
+func TestPrintTable_NoHeaders(t *testing.T) {
+	tbl := sampleTable()
+	tbl.NoHeaders = true
+	var buf bytes.Buffer
+	if err := Print(&buf, tbl, FormatTable); err != nil {
+		t.Fatalf("Print: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "CONTEXT") || strings.Contains(out, "NAME") {
+		t.Errorf("headers should be suppressed, got: %q", out)
+	}
+	if !strings.Contains(out, "prod") || !strings.Contains(out, "dev") {
+		t.Errorf("rows missing: %q", out)
+	}
+}
+
+func TestPrintWide_NoHeaders(t *testing.T) {
+	tbl := sampleTable()
+	tbl.NoHeaders = true
+	var buf bytes.Buffer
+	if err := Print(&buf, tbl, FormatWide); err != nil {
+		t.Fatalf("Print: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "CLUSTER") {
+		t.Errorf("wide headers should be suppressed, got: %q", out)
+	}
+	if !strings.Contains(out, "c-prod") {
+		t.Errorf("wide row missing: %q", out)
+	}
+}
