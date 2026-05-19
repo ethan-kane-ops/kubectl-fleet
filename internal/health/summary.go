@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,22 +13,31 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// Options tunes Summarize.
+type Options struct {
+	// Since enables a count of container restart events whose
+	// LastTerminationState.Terminated.FinishedAt falls within the window.
+	// Zero disables the window count (PodsRestartedInWindow stays 0).
+	Since time.Duration
+}
+
 // Summary is the per-cluster snapshot.
 type Summary struct {
-	ServerVersion  string
-	NodesReady     int
-	NodesTotal     int
-	PodsRunning    int
-	PodsPending    int
-	PodsCrashLoop  int
-	PodsFailed     int
-	PodsTotal      int
-	TopNoisyNS     []NamespaceNoise
+	ServerVersion         string
+	NodesReady            int
+	NodesTotal            int
+	PodsRunning           int
+	PodsPending           int
+	PodsCrashLoop         int
+	PodsFailed            int
+	PodsTotal             int
+	PodsRestartedInWindow int
+	TopNoisyNS            []NamespaceNoise
 }
 
 // NamespaceNoise reports a single namespace's non-Running pod count.
 type NamespaceNoise struct {
-	Namespace string
+	Namespace  string
 	NonRunning int
 }
 
@@ -35,7 +45,7 @@ type NamespaceNoise struct {
 //
 // disco may be nil; when set, used for server version (slightly cheaper than
 // a typed client call via Discovery()).
-func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.DiscoveryInterface) (Summary, error) {
+func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.DiscoveryInterface, opts Options) (Summary, error) {
 	var s Summary
 
 	if disco == nil {
@@ -62,6 +72,10 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 	}
 	s.PodsTotal = len(pods.Items)
 	noisy := map[string]int{}
+	var cutoff time.Time
+	if opts.Since > 0 {
+		cutoff = time.Now().Add(-opts.Since)
+	}
 	for i := range pods.Items {
 		p := &pods.Items[i]
 		switch p.Status.Phase {
@@ -79,6 +93,9 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 		if isCrashLoop(p) {
 			s.PodsCrashLoop++
 			noisy[p.Namespace]++
+		}
+		if !cutoff.IsZero() {
+			s.PodsRestartedInWindow += countRestartsInWindow(p, cutoff)
 		}
 	}
 	s.TopNoisyNS = topNoisy(noisy, 3)
@@ -101,6 +118,31 @@ func isCrashLoop(p *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// countRestartsInWindow returns the number of containers in p whose last
+// termination happened after cutoff. A container restarting many times in the
+// window still counts once because only the most recent termination carries
+// a timestamp — accept the floor; the metric is a triage signal, not a SLA.
+func countRestartsInWindow(p *corev1.Pod, cutoff time.Time) int {
+	n := 0
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.LastTerminationState.Terminated == nil {
+			continue
+		}
+		if cs.LastTerminationState.Terminated.FinishedAt.After(cutoff) {
+			n++
+		}
+	}
+	for _, cs := range p.Status.InitContainerStatuses {
+		if cs.LastTerminationState.Terminated == nil {
+			continue
+		}
+		if cs.LastTerminationState.Terminated.FinishedAt.After(cutoff) {
+			n++
+		}
+	}
+	return n
 }
 
 func topNoisy(m map[string]int, n int) []NamespaceNoise {

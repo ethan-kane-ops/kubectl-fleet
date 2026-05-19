@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -20,6 +21,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		filter      string
 		parallelism int
 		outputFlag  string
+		since       time.Duration
 	)
 	c := &cobra.Command{
 		Use:   "status",
@@ -40,39 +42,46 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if len(refs) == 0 {
 				return fmt.Errorf("no matching contexts")
 			}
+			opts := health.Options{Since: since}
 			results := fleet.Run(cmd.Context(), refs, parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (health.Summary, error) {
-					return statusOne(ctx, kubeFlags, r)
+					return statusOne(ctx, kubeFlags, r, opts)
 				})
-			tbl := &output.Table{
-				Headers:     []string{"CONTEXT", "VERSION", "NODES", "PODS", "PENDING", "CRASHLOOP"},
-				WideHeaders: []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"},
+
+			headers := []string{"CONTEXT", "VERSION", "NODES", "PODS", "PENDING", "CRASHLOOP"}
+			if since > 0 {
+				headers = append(headers, "RESTARTS_"+since.String())
 			}
+			wideHeaders := []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"}
+			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders}
+
 			for _, res := range results {
 				if res.Err != nil {
-					tbl.Append(
-						[]string{res.Context, "?", "?", "?", "?", "?"},
-						[]string{"?", "?", "", res.Err.Error()},
-					)
+					row := []string{res.Context, "?", "?", "?", "?", "?"}
+					if since > 0 {
+						row = append(row, "?")
+					}
+					tbl.Append(row, []string{"?", "?", "", res.Err.Error()})
 					continue
 				}
 				s := res.Value
-				tbl.Append(
-					[]string{
-						res.Context,
-						s.ServerVersion,
-						fmt.Sprintf("%d/%d", s.NodesReady, s.NodesTotal),
-						fmt.Sprintf("%d", s.PodsRunning),
-						fmt.Sprintf("%d", s.PodsPending),
-						fmt.Sprintf("%d", s.PodsCrashLoop),
-					},
-					[]string{
-						fmt.Sprintf("%d", s.PodsFailed),
-						fmt.Sprintf("%d", s.PodsTotal),
-						formatNoisy(s.TopNoisyNS),
-						"",
-					},
-				)
+				row := []string{
+					res.Context,
+					s.ServerVersion,
+					fmt.Sprintf("%d/%d", s.NodesReady, s.NodesTotal),
+					fmt.Sprintf("%d", s.PodsRunning),
+					fmt.Sprintf("%d", s.PodsPending),
+					fmt.Sprintf("%d", s.PodsCrashLoop),
+				}
+				if since > 0 {
+					row = append(row, fmt.Sprintf("%d", s.PodsRestartedInWindow))
+				}
+				tbl.Append(row, []string{
+					fmt.Sprintf("%d", s.PodsFailed),
+					fmt.Sprintf("%d", s.PodsTotal),
+					formatNoisy(s.TopNoisyNS),
+					"",
+				})
 			}
 			return output.Print(cmd.OutOrStdout(), tbl, f)
 		},
@@ -80,10 +89,11 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
 	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel cluster calls (0=unbounded)")
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml")
+	c.Flags().DurationVar(&since, "since", 0, "if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)")
 	return c
 }
 
-func statusOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef) (health.Summary, error) {
+func statusOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, opts health.Options) (health.Summary, error) {
 	restCfg, err := kubeconfig.RESTConfigFor(kubeFlags, r.Name)
 	if err != nil {
 		return health.Summary{}, err
@@ -92,7 +102,7 @@ func statusOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r 
 	if err != nil {
 		return health.Summary{}, err
 	}
-	return health.Summarize(ctx, clients.Typed, clients.Discovery)
+	return health.Summarize(ctx, clients.Typed, clients.Discovery, opts)
 }
 
 func formatNoisy(ns []health.NamespaceNoise) string {
