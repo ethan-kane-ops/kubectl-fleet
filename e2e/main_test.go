@@ -49,24 +49,23 @@ func TestMain(m *testing.M) {
 const fixtureWaitTimeout = 2 * time.Minute
 
 // waitForFixtures blocks until cluster A's healthy Deployment is fully
-// Available and cluster B's crashing Deployment has produced at least one
-// container restart, so tests don't race the scheduler/kubelet on a
-// freshly created cluster. Each cluster gets its own independent timeout:
-// a slow CI runner making cluster A's wait take most of a shared budget
-// must not starve cluster B's wait of time it never got to use.
+// Available, so get/status tests don't race the scheduler on a freshly
+// created cluster. Cluster B's crash-looping Deployment is deliberately
+// NOT waited on here: CrashLoopBackOff is a state that continuously cycles
+// (kubelet's backoff window shrinks back to near-zero on every restart
+// attempt), so a one-time precondition check here could easily observe it
+// true and then have it flip false again by the time a later test actually
+// asserts on it. TestE2E_Status polls the real CLI output directly instead
+// of trusting a point-in-time snapshot taken earlier.
 func waitForFixtures() error {
 	csA, err := clientFor(contextA)
 	if err != nil {
 		return fmt.Errorf("client for %s: %w", contextA, err)
 	}
-	csB, err := clientFor(contextB)
-	if err != nil {
-		return fmt.Errorf("client for %s: %w", contextB, err)
-	}
 
-	ctxA, cancelA := context.WithTimeout(context.Background(), fixtureWaitTimeout)
-	defer cancelA()
-	err = wait.PollUntilContextTimeout(ctxA, 2*time.Second, fixtureWaitTimeout, true, func(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), fixtureWaitTimeout)
+	defer cancel()
+	err = wait.PollUntilContextTimeout(ctx, 2*time.Second, fixtureWaitTimeout, true, func(ctx context.Context) (bool, error) {
 		d, err := csA.AppsV1().Deployments("payments").Get(ctx, "api", metav1.GetOptions{})
 		if err != nil {
 			return false, nil //nolint:nilerr // transient: keep polling until timeout
@@ -76,28 +75,24 @@ func waitForFixtures() error {
 	if err != nil {
 		return fmt.Errorf("waiting for %s payments/api to become available: %w", contextA, err)
 	}
-
-	ctxB, cancelB := context.WithTimeout(context.Background(), fixtureWaitTimeout)
-	defer cancelB()
-	err = wait.PollUntilContextTimeout(ctxB, 2*time.Second, fixtureWaitTimeout, true, func(ctx context.Context) (bool, error) {
-		pods, err := csB.CoreV1().Pods("payments").List(ctx, metav1.ListOptions{LabelSelector: "app=crashy"})
-		if err != nil || len(pods.Items) == 0 {
-			return false, nil //nolint:nilerr // transient: keep polling until timeout
-		}
-		for _, cs := range pods.Items[0].Status.ContainerStatuses {
-			// health.isCrashLoop keys off this exact waiting reason, not just
-			// RestartCount>0: a pod can be transiently Running again between
-			// restarts, so wait for the actual backoff state `status` checks.
-			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
-				return true, nil
-			}
-		}
-		return false, nil
-	})
-	if err != nil {
-		return fmt.Errorf("waiting for %s payments/crashy to enter CrashLoopBackOff: %w", contextB, err)
-	}
 	return nil
+}
+
+// eventually retries fn until it returns true or timeout elapses, sleeping
+// interval between attempts. Used for asserting on state that continuously
+// cycles (like CrashLoopBackOff) rather than settling once.
+func eventually(t *testing.T, timeout, interval time.Duration, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if fn() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("condition not met within %s", timeout)
+		}
+		time.Sleep(interval)
+	}
 }
 
 func clientFor(ctxName string) (*kubernetes.Clientset, error) {
