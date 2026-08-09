@@ -78,6 +78,20 @@ func TestRunRespectsParallelismLimit(t *testing.T) {
 	}
 }
 
+func TestCountErrors(t *testing.T) {
+	boom := errors.New("boom")
+	got := Run(context.Background(), refs("ok1", "bad1", "bad2"), 8,
+		func(_ context.Context, r kubeconfig.ContextRef) (int, error) {
+			if r.Name == "ok1" {
+				return 42, nil
+			}
+			return 0, boom
+		})
+	if n := CountErrors(got); n != 2 {
+		t.Errorf("CountErrors = %d, want 2", n)
+	}
+}
+
 func TestRunEmpty(t *testing.T) {
 	got := Run(context.Background(), nil, 4,
 		func(_ context.Context, _ kubeconfig.ContextRef) (int, error) { return 1, nil })

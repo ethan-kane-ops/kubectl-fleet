@@ -22,6 +22,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		parallelism int
 		outputFlag  string
 		noHeaders   bool
+		strict      bool
 	)
 	c := &cobra.Command{
 		Use:   "contexts",
@@ -69,7 +70,15 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if probe && f == output.FormatTable {
 				f = output.FormatWide
 			}
-			return output.Print(cmd.OutOrStdout(), tbl, f)
+			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
+				return err
+			}
+			if strict && probe {
+				if n := fleet.CountErrors(probes); n > 0 {
+					return fmt.Errorf("%d of %d contexts unreachable", n, len(probes))
+				}
+			}
+			return nil
 		},
 	}
 	c.Flags().StringVar(&filter, "filter", "", "regex applied to context names")
@@ -78,6 +87,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel probes (0=unbounded)")
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
+	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any probed context is unreachable (requires --check)")
 	return c
 }
 

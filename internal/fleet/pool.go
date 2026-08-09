@@ -40,3 +40,14 @@ func Run[T any](ctx context.Context, refs []kubeconfig.ContextRef, parallelism i
 	_ = g.Wait()
 	return results
 }
+
+// CountErrors returns the number of results with a non-nil Err.
+func CountErrors[T any](results []ClusterResult[T]) int {
+	n := 0
+	for _, r := range results {
+		if r.Err != nil {
+			n++
+		}
+	}
+	return n
+}

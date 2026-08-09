@@ -20,6 +20,26 @@ func TestStatusNoMatchingContexts(t *testing.T) {
 	}
 }
 
+func TestStatusStrictFailsOnClusterError(t *testing.T) {
+	c := newStatusCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"--strict"})
+	if err := c.Execute(); err == nil {
+		t.Fatal("expected error, the only context is unreachable")
+	}
+}
+
+func TestStatusWithoutStrictSucceeds(t *testing.T) {
+	c := newStatusCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs(nil)
+	if err := c.Execute(); err != nil {
+		t.Fatalf("cluster errors should only land in the table without --strict: %v", err)
+	}
+}
+
 func TestFormatNoisy(t *testing.T) {
 	in := []health.NamespaceNoise{
 		{Namespace: "kube-system", NonRunning: 3},

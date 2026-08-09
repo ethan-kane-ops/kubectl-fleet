@@ -30,6 +30,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		allNamespaces bool
 		outputFlag    string
 		noHeaders     bool
+		strict        bool
 	)
 	c := &cobra.Command{
 		Use:   "get <kind> [name]",
@@ -91,7 +92,15 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					tbl.Append(append(prefix, cols...), append(wide, ""))
 				}
 			}
-			return output.Print(cmd.OutOrStdout(), tbl, f)
+			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
+				return err
+			}
+			if strict {
+				if n := fleet.CountErrors(results); n > 0 {
+					return fmt.Errorf("%d of %d contexts failed", n, len(results))
+				}
+			}
+			return nil
 		},
 	}
 	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
@@ -100,6 +109,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "query across all namespaces")
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
+	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
 	return c
 }
 

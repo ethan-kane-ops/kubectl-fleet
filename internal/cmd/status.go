@@ -23,6 +23,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		outputFlag  string
 		since       time.Duration
 		noHeaders   bool
+		strict      bool
 	)
 	c := &cobra.Command{
 		Use:   "status",
@@ -84,7 +85,15 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					"",
 				})
 			}
-			return output.Print(cmd.OutOrStdout(), tbl, f)
+			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
+				return err
+			}
+			if strict {
+				if n := fleet.CountErrors(results); n > 0 {
+					return fmt.Errorf("%d of %d contexts failed", n, len(results))
+				}
+			}
+			return nil
 		},
 	}
 	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
@@ -92,6 +101,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().DurationVar(&since, "since", 0, "if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)")
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
+	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
 	return c
 }
 

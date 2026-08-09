@@ -44,6 +44,33 @@ func newFlags(path string) *genericclioptions.ConfigFlags {
 	return f
 }
 
+// fixtureKubeconfigUnreachable points at a loopback port nothing listens on,
+// so every call fails fast with "connection refused" (no DNS lookup, no
+// hang) — deterministic per-context failures for exercising --strict.
+const fixtureKubeconfigUnreachable = `apiVersion: v1
+kind: Config
+clusters:
+- name: c-prod
+  cluster: {server: https://127.0.0.1:1}
+users:
+- name: u
+  user: {token: t}
+contexts:
+- name: prod
+  context: {cluster: c-prod, user: u}
+current-context: prod
+`
+
+func tmpKubeconfigUnreachable(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kubeconfig")
+	if err := os.WriteFile(path, []byte(fixtureKubeconfigUnreachable), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return path
+}
+
 func TestContextsList(t *testing.T) {
 	c := newContextsCmd(newFlags(tmpKubeconfig(t)))
 	var buf bytes.Buffer
@@ -79,6 +106,36 @@ func TestContextsFilter(t *testing.T) {
 	}
 	if strings.Contains(out, "stage") {
 		t.Errorf("stage should be filtered out:\n%s", out)
+	}
+}
+
+func TestContextsStrictWithoutCheckIsNoop(t *testing.T) {
+	c := newContextsCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"--strict"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("--strict without --check should not probe: %v", err)
+	}
+}
+
+func TestContextsStrictWithCheckFailsOnUnreachable(t *testing.T) {
+	c := newContextsCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"--check", "--strict", "--timeout", "2s"})
+	if err := c.Execute(); err == nil {
+		t.Fatal("expected error, all contexts are unreachable")
+	}
+}
+
+func TestContextsCheckWithoutStrictSucceeds(t *testing.T) {
+	c := newContextsCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"--check", "--timeout", "2s"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("failures should only be reported in the table without --strict: %v", err)
 	}
 }
 
