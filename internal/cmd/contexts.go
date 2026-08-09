@@ -106,4 +106,3 @@ func probeOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r k
 	}
 	return reach{version: v.GitVersion, latency: lat}, nil
 }
-

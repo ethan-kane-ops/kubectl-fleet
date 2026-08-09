@@ -123,7 +123,7 @@ func isCrashLoop(p *corev1.Pod) bool {
 // countRestartsInWindow returns the number of containers in p whose last
 // termination happened after cutoff. A container restarting many times in the
 // window still counts once because only the most recent termination carries
-// a timestamp — accept the floor; the metric is a triage signal, not a SLA.
+// a timestamp: accept the floor, the metric is a triage signal, not a SLA.
 func countRestartsInWindow(p *corev1.Pod, cutoff time.Time) int {
 	n := 0
 	for _, cs := range p.Status.ContainerStatuses {

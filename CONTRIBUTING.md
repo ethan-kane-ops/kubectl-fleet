@@ -7,11 +7,11 @@ testing, and the conventions enforced on every PR.
 
 Required tooling:
 
-- **Go** — version pinned in `go.mod` (≥ 1.22)
-- **[mise](https://mise.jdx.dev/)** — runtime manager (`brew install mise` on macOS)
-- **[just](https://just.systems/)** — task runner (installed by mise)
-- **[golangci-lint](https://golangci-lint.run/)** — installed by mise
-- **kubectl** — 1.12+ (for plugin discovery testing)
+- **Go**: version pinned in `go.mod` (≥ 1.22)
+- **[mise](https://mise.jdx.dev/)**: runtime manager (`brew install mise` on macOS)
+- **[just](https://just.systems/)**: task runner (installed by mise)
+- **[golangci-lint](https://golangci-lint.run/)**: installed by mise
+- **kubectl**: 1.12+ (for plugin discovery testing)
 - A reachable Kubernetes cluster for end-to-end testing (k3d, kind, minikube)
 
 Bootstrap:
@@ -20,7 +20,7 @@ Bootstrap:
 git clone https://github.com/ethan-kane-ops/kubectl-fleet
 cd kubectl-fleet
 mise install      # installs pinned Go + linters
-just check        # tidy + lint + test — must pass before any commit
+just check        # tidy + lint + test, must pass before any commit
 ```
 
 ## Common tasks
@@ -58,7 +58,7 @@ accept `*genericclioptions.ConfigFlags` so kubectl global flags (`--context`,
 ## Coding conventions
 
 - **Error strings**: lowercase, no trailing punctuation, wrapped with `%w`.
-  Example: `fmt.Errorf("resolve gvr: %w", err)` — not `"Failed to resolve GVR."`
+  Example: `fmt.Errorf("resolve gvr: %w", err)`, not `"Failed to resolve GVR."`
 - **Errors are aggregated, never fatal across the fleet.** A single cluster
   failing must not abort processing for the others. Use `internal/fleet.Run`
   and surface per-cluster errors in the result table.
@@ -104,7 +104,7 @@ through PRs. Tags are cut from `main` and only by maintainers (see *Releasing*).
 ## Releasing (maintainers only)
 
 ```bash
-just release-snapshot    # local goreleaser dry-run — verify multi-arch builds
+just release-snapshot    # local goreleaser dry-run: verify multi-arch builds
 just release 0.1.1       # creates tag v0.1.1, pushes, fires release workflow
 ```
 
@@ -115,7 +115,7 @@ commits between tags, grouped by Conventional-Commit type.
 
 Versioning follows SemVer:
 
-- `v0.x.y` — pre-1.0, breaking changes allowed in minor bumps
+- `v0.x.y`: pre-1.0, breaking changes allowed in minor bumps
 - Patch bumps for fixes and non-breaking polish between phases
 - Minor bumps for new phases (Argo support, drift detection, etc.)
 - `v1.0.0` will mark feature-complete and trigger krew submission
