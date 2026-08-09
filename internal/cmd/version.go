@@ -22,6 +22,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		parallelism int
 		outputFlag  string
 		noHeaders   bool
+		strict      bool
 	)
 	c := &cobra.Command{
 		Use:   "version",
@@ -74,7 +75,15 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					[]string{v.GitCommit, v.BuildDate, v.Platform, ""},
 				)
 			}
-			return output.Print(cmd.OutOrStdout(), tbl, f)
+			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
+				return err
+			}
+			if strict {
+				if n := fleet.CountErrors(results); n > 0 {
+					return fmt.Errorf("%d of %d contexts failed", n, len(results))
+				}
+			}
+			return nil
 		},
 	}
 	c.Flags().BoolVar(&clientOnly, "client", false, "show client version only, skip cluster probes")
@@ -82,6 +91,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel cluster calls (0=unbounded)")
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
+	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed (ignored with --client)")
 	return c
 }
 

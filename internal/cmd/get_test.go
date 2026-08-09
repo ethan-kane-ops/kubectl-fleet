@@ -16,6 +16,26 @@ func TestGetCmdArgs(t *testing.T) {
 	}
 }
 
+func TestGetCmdStrictFailsOnClusterError(t *testing.T) {
+	c := newGetCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"pods", "--strict"})
+	if err := c.Execute(); err == nil {
+		t.Fatal("expected error, the only context is unreachable")
+	}
+}
+
+func TestGetCmdWithoutStrictSucceeds(t *testing.T) {
+	c := newGetCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"pods"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("cluster errors should only land in the table without --strict: %v", err)
+	}
+}
+
 func TestGetCmdNoMatchingContexts(t *testing.T) {
 	c := newGetCmd(newFlags(tmpKubeconfig(t)))
 	var buf bytes.Buffer

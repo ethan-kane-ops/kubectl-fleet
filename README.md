@@ -1,11 +1,18 @@
 # kubectl-fleet
 
+[![CI](https://github.com/ethan-kane-ops/kubectl-fleet/actions/workflows/ci.yml/badge.svg)](https://github.com/ethan-kane-ops/kubectl-fleet/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ethan-kane-ops/kubectl-fleet.svg)](https://pkg.go.dev/github.com/ethan-kane-ops/kubectl-fleet)
+[![Latest release](https://img.shields.io/github/v/release/ethan-kane-ops/kubectl-fleet)](https://github.com/ethan-kane-ops/kubectl-fleet/releases)
+[![License](https://img.shields.io/github/license/ethan-kane-ops/kubectl-fleet)](LICENSE)
+
 Multi-cluster operational awareness for Kubernetes fleets.
 
 `kubectl-fleet` is a kubectl plugin that fans queries out across every
 kubeconfig context in parallel and rolls the results back into a single,
 context-aware table. Use it to triage incidents, check rollout parity, or audit
 fleet-wide state without juggling N terminal tabs.
+
+![kubectl fleet status, get, and contexts --check across three clusters](demo.gif)
 
 ```
 $ kubectl fleet status --contexts '^prod-'
@@ -53,7 +60,31 @@ kubectl fleet --help
 > [`kubernetes-sigs/krew-index`](https://github.com/kubernetes-sigs/krew-index)
 > so `kubectl krew install fleet` becomes the recommended path.
 
+### Shell completion
+
+`kubectl-fleet` gets Cobra's completion generator for free. It's scoped to
+the `kubectl-fleet` binary name (not `kubectl`), so it completes direct
+invocations without touching real kubectl's own completion:
+
+```bash
+# bash (current shell only)
+source <(kubectl-fleet completion bash)
+
+# zsh, written to your fpath
+kubectl-fleet completion zsh > "${fpath[1]}/_kubectl-fleet"
+
+# fish
+kubectl-fleet completion fish | source
+```
+
+Run `kubectl-fleet completion --help` for persistent per-shell install
+instructions. This completes `kubectl-fleet <TAB>`, not `kubectl fleet <TAB>`,
+since kubectl doesn't forward completion requests to plugins.
+
 ## Commands
+
+Full generated reference for every subcommand and flag lives in
+[`docs/`](docs/kubectl_fleet.md).
 
 ### `kubectl fleet contexts`
 

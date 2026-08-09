@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest a new subcommand, flag, or behavior
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: What are you trying to do that kubectl-fleet doesn't support today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Rough shape of the command/flag, sample output if you have one in mind.
+    validations:
+      required: false

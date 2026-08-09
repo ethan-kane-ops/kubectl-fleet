@@ -34,8 +34,19 @@ just test-race        # race detector
 just lint             # go vet + golangci-lint
 just check            # tidy + lint + test (gating recipe)
 just install          # go install ./... (binary on PATH for manual testing)
+just docs             # regenerate command reference in ./docs
 just release-snapshot # local goreleaser dry-run (no publish)
 ```
+
+`docs/` is generated from the cobra command tree, not hand-written. Run
+`just docs` after adding or changing a subcommand or flag, and commit the
+result. CI fails the build if `docs/` is out of sync with the code
+(`go run ./cmd/gendocs && git diff --exit-code docs`).
+
+`demo.gif` in the README is a staged recording (`demo.tape` + the canned
+`demo/kubectl-fleet` stub), not live cluster output — there's no multi-region
+prod fleet to record against. It mirrors the sample blocks already in
+README.md; regenerate it with `just demo` if those samples change.
 
 `just check` is the gate. Every commit and every PR must leave the tree green.
 
@@ -43,12 +54,14 @@ just release-snapshot # local goreleaser dry-run (no publish)
 
 ```
 cmd/kubectl-fleet/main.go    Entry; ldflag-injected version/commit/date
+cmd/gendocs/main.go          Generates docs/ from the cobra command tree
 internal/cmd/                Cobra subcommands; one verb per file
 internal/kubeconfig/         Multi-context loader + REST config builder
 internal/fleet/              Bounded parallel executor (errgroup with SetLimit)
 internal/k8s/                Typed + dynamic + discovery client factory; GVR resolver
 internal/output/             Table/JSON/YAML printers
 internal/health/             Per-cluster summary used by `status`
+docs/                        Generated command reference (see `just docs`)
 ```
 
 New subcommands live in `internal/cmd/`, register in `NewRootCmd` (`root.go`), and
@@ -129,5 +142,4 @@ Open a GitHub issue with:
 - Minimal reproduction (kubeconfig snippet, command line, observed vs expected)
 - For multi-cluster bugs: number of contexts and any regex used
 
-Security issues: do **not** open a public issue. Email the maintainer or use
-GitHub's private vulnerability reporting.
+Security issues: see [SECURITY.md](SECURITY.md). Do not open a public issue.
