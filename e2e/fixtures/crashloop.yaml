@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crashy
+  namespace: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crashy
+  template:
+    metadata:
+      labels:
+        app: crashy
+    spec:
+      containers:
+        - name: crashy
+          image: busybox:stable
+          command: ["sh", "-c", "exit 1"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
