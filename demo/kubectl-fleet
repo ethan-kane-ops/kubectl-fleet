@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Canned output for the README demo recording (see ../demo.tape).
+# Not the real binary — mirrors the sample blocks already documented in
+# README.md so the recording matches the written docs. Regenerate the gif
+# with `just demo`.
+set -euo pipefail
+
+case "${1:-}" in
+  status)
+    cat <<'EOF'
+CONTEXT      VERSION      NODES   PODS   PENDING   CRASHLOOP
+prod-eu-1    v1.31.2      6/6     142    0         0
+prod-us-1    v1.31.2      6/6     138    2         1
+prod-ap-1    v1.30.6      4/4     97     0         0
+EOF
+    ;;
+  get)
+    cat <<'EOF'
+CONTEXT      NAMESPACE    NAME                          AGE
+prod-eu-1    payments     api-7d4f6c5b9-abcde           4d
+prod-us-1    payments     api-7d4f6c5b9-fghij           4d
+prod-ap-1    payments     api-9b2a4e1d3-klmno           1h
+EOF
+    ;;
+  contexts)
+    cat <<'EOF'
+CONTEXT      CLUSTER       NAMESPACE     REACHABLE   VERSION     LATENCY
+prod-eu-1    prod-eu-1     default       yes         v1.31.2     42ms
+prod-us-1    prod-us-1     default       yes         v1.31.2     128ms
+prod-ap-1    prod-ap-1     default       yes         v1.30.6     310ms
+dev-local    k3d-dev       kube-system   no          -           -
+EOF
+    ;;
+  *)
+    echo "demo stub: unsupported subcommand '${1:-}'" >&2
+    exit 1
+    ;;
+esac

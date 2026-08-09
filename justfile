@@ -43,6 +43,10 @@ install:
 docs:
     go run ./cmd/gendocs
 
+# Regenerate the README demo gif (requires vhs: https://github.com/charmbracelet/vhs)
+demo:
+    vhs demo.tape
+
 # Dry-run a goreleaser build locally (no publish)
 release-snapshot:
     goreleaser release --snapshot --clean

@@ -43,6 +43,11 @@ just release-snapshot # local goreleaser dry-run (no publish)
 result. CI fails the build if `docs/` is out of sync with the code
 (`go run ./cmd/gendocs && git diff --exit-code docs`).
 
+`demo.gif` in the README is a staged recording (`demo.tape` + the canned
+`demo/kubectl-fleet` stub), not live cluster output — there's no multi-region
+prod fleet to record against. It mirrors the sample blocks already in
+README.md; regenerate it with `just demo` if those samples change.
+
 `just check` is the gate. Every commit and every PR must leave the tree green.
 
 ## Project layout

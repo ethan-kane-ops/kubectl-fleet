@@ -12,6 +12,8 @@ kubeconfig context in parallel and rolls the results back into a single,
 context-aware table. Use it to triage incidents, check rollout parity, or audit
 fleet-wide state without juggling N terminal tabs.
 
+![kubectl fleet status, get, and contexts --check across three clusters](demo.gif)
+
 ```
 $ kubectl fleet status --contexts '^prod-'
 CONTEXT      VERSION      NODES   PODS   PENDING   CRASHLOOP
