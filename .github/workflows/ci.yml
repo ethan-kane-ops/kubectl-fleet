@@ -19,5 +19,6 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go mod tidy && git diff --exit-code go.mod go.sum
+      - run: go run ./cmd/gendocs && git diff --exit-code docs
       - run: go vet ./...
       - run: go test -race ./...

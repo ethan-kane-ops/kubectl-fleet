@@ -39,6 +39,10 @@ install:
     mise reshim 2>/dev/null || true
     @echo "installed → $(which kubectl-fleet 2>/dev/null || go env GOBIN)/kubectl-fleet"
 
+# Regenerate command reference docs into ./docs
+docs:
+    go run ./cmd/gendocs
+
 # Dry-run a goreleaser build locally (no publish)
 release-snapshot:
     goreleaser release --snapshot --clean
