@@ -18,6 +18,13 @@ func NewRootCmd() *cobra.Command {
 		Short:         "Multi-cluster operational awareness for K8s fleets",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// cobra.Command.Name() only takes the first word of Use, so without
+		// this every subcommand's usage line renders as "kubectl <verb>"
+		// instead of "kubectl fleet <verb>". This is cobra's documented fix
+		// for multi-word plugin invocations.
+		Annotations: map[string]string{
+			cobra.CommandDisplayNameAnnotation: "kubectl fleet",
+		},
 	}
 
 	kubeFlags.AddFlags(root.PersistentFlags())
