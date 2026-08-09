@@ -21,6 +21,7 @@ spec:
       containers:
         - name: crashy
           image: busybox:stable
+          imagePullPolicy: IfNotPresent
           command: ["sh", "-c", "exit 1"]
           resources:
             requests:

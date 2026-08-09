@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,11 @@ func TestMain(m *testing.M) {
 
 const fixtureWaitTimeout = 2 * time.Minute
 
+// crashloopWaitTimeout is more generous than fixtureWaitTimeout: it has to
+// cover a full image pull plus at least one CrashLoopBackOff cycle on a
+// potentially slow/shared CI runner, not just a Deployment reaching Ready.
+const crashloopWaitTimeout = 3 * time.Minute
+
 // waitForFixtures blocks until cluster A's healthy Deployment is fully
 // Available, so get/status tests don't race the scheduler on a freshly
 // created cluster. Cluster B's crash-looping Deployment is deliberately
@@ -80,19 +86,63 @@ func waitForFixtures() error {
 
 // eventually retries fn until it returns true or timeout elapses, sleeping
 // interval between attempts. Used for asserting on state that continuously
-// cycles (like CrashLoopBackOff) rather than settling once.
-func eventually(t *testing.T, timeout, interval time.Duration, fn func() bool) {
-	t.Helper()
+// cycles (like CrashLoopBackOff) rather than settling once. Reports success
+// rather than failing directly, so callers can attach diagnostics (pod
+// status/events) to the failure before calling t.Fatalf themselves.
+func eventually(timeout, interval time.Duration, fn func() bool) bool {
 	deadline := time.Now().Add(timeout)
 	for {
 		if fn() {
-			return
+			return true
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("condition not met within %s", timeout)
+			return false
 		}
 		time.Sleep(interval)
 	}
+}
+
+// describePods returns a human-readable dump of pod status and recent
+// namespace events for the given context/namespace/selector, for attaching
+// to a test failure so a CI-only flake doesn't have to be diagnosed blind a
+// second time.
+func describePods(ctxName, namespace, selector string) string {
+	cs, err := clientFor(ctxName)
+	if err != nil {
+		return fmt.Sprintf("describePods: client for %s: %v", ctxName, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var sb strings.Builder
+	pods, err := cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		fmt.Fprintf(&sb, "list pods: %v\n", err)
+	}
+	for _, p := range pods.Items {
+		fmt.Fprintf(&sb, "pod %s: phase=%s\n", p.Name, p.Status.Phase)
+		for _, cs := range p.Status.ContainerStatuses {
+			fmt.Fprintf(&sb, "  container %s: ready=%v restarts=%d", cs.Name, cs.Ready, cs.RestartCount)
+			switch {
+			case cs.State.Waiting != nil:
+				fmt.Fprintf(&sb, " waiting=%s (%s)", cs.State.Waiting.Reason, cs.State.Waiting.Message)
+			case cs.State.Running != nil:
+				fmt.Fprintf(&sb, " running since=%s", cs.State.Running.StartedAt)
+			case cs.State.Terminated != nil:
+				fmt.Fprintf(&sb, " terminated=%s (exit %d)", cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	events, err := cs.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		fmt.Fprintf(&sb, "list events: %v\n", err)
+	}
+	for _, e := range events.Items {
+		fmt.Fprintf(&sb, "event: %s %s/%s: %s (%s)\n", e.LastTimestamp, e.InvolvedObject.Kind, e.InvolvedObject.Name, e.Message, e.Reason)
+	}
+	return sb.String()
 }
 
 func clientFor(ctxName string) (*kubernetes.Clientset, error) {

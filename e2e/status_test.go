@@ -16,7 +16,7 @@ func TestE2E_Status(t *testing.T) {
 	// catches the crash-looping cluster in that state rather than trusting a
 	// one-time precondition check elsewhere to still hold by the time this
 	// runs.
-	eventually(t, fixtureWaitTimeout, 3*time.Second, func() bool {
+	ok := eventually(crashloopWaitTimeout, 3*time.Second, func() bool {
 		rows, code = runJSON(t, "status", "--contexts", "^kind-fleet-e2e-")
 		if code != 0 {
 			return false
@@ -28,6 +28,10 @@ func TestE2E_Status(t *testing.T) {
 		}
 		return false
 	})
+	if !ok {
+		t.Fatalf("%s never reported CRASHLOOP>0 within %s; last rows: %+v\n%s",
+			contextB, crashloopWaitTimeout, rows, describePods(contextB, "payments", "app=crashy"))
+	}
 
 	byCtx := map[string]map[string]string{}
 	for _, r := range rows {

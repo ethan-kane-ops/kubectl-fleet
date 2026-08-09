@@ -21,6 +21,7 @@ spec:
       containers:
         - name: api
           image: busybox:stable
+          imagePullPolicy: IfNotPresent
           command: ["sleep", "3600"]
           resources:
             requests:
