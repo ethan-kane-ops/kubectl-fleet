@@ -49,10 +49,15 @@ func TestMain(m *testing.M) {
 
 const fixtureWaitTimeout = 2 * time.Minute
 
-// crashloopWaitTimeout is more generous than fixtureWaitTimeout: it has to
-// cover a full image pull plus at least one CrashLoopBackOff cycle on a
-// potentially slow/shared CI runner, not just a Deployment reaching Ready.
-const crashloopWaitTimeout = 3 * time.Minute
+// crashloopWaitTimeout is more generous than fixtureWaitTimeout. Diagnostics
+// from a real CI failure showed the image pull itself is fast (~1s); the
+// slow part is kubelet actually getting around to creating the container at
+// all, which took ~2m48s on a GH Actions runner running two full kind
+// control planes at once (CPU contention on the standard 2-vCPU runner).
+// Once the container does start, it enters CrashLoopBackOff within a second,
+// so this budget mostly needs to cover kubelet catching up, not the crash
+// loop itself.
+const crashloopWaitTimeout = 5 * time.Minute
 
 // waitForFixtures blocks until cluster A's healthy Deployment is fully
 // Available, so get/status tests don't race the scheduler on a freshly
