@@ -137,5 +137,4 @@ Open a GitHub issue with:
 - Minimal reproduction (kubeconfig snippet, command line, observed vs expected)
 - For multi-cluster bugs: number of contexts and any regex used
 
-Security issues: do **not** open a public issue. Email the maintainer or use
-GitHub's private vulnerability reporting.
+Security issues: see [SECURITY.md](SECURITY.md). Do not open a public issue.

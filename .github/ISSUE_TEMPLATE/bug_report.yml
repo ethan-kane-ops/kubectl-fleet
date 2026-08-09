@@ -1,0 +1,41 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: >
+        Kubeconfig shape (context names/count), the exact command line, and
+        observed vs. expected output.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: fleet-version
+    attributes:
+      label: kubectl fleet version output
+      placeholder: kubectl fleet version --client
+    validations:
+      required: true
+  - type: input
+    id: kubectl-version
+    attributes:
+      label: kubectl version output
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Number of contexts involved, any --contexts regex used, etc.
+    validations:
+      required: false
