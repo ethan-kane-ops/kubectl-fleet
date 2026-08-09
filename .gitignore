@@ -1,5 +1,6 @@
 bin/
 dist/
+e2e/.kubeconfig
 *.test
 *.out
 coverage.txt

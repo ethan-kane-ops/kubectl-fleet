@@ -22,3 +22,18 @@ jobs:
       - run: go run ./cmd/gendocs && git diff --exit-code docs
       - run: go vet ./...
       - run: go test -race ./...
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go install sigs.k8s.io/kind@v0.32.0
+      - run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+      - run: just e2e-up
+      - run: just e2e-test
+      - if: always()
+        run: just e2e-down

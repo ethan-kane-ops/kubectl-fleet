@@ -12,7 +12,7 @@ Required tooling:
 - **[just](https://just.systems/)**: task runner (installed by mise)
 - **[golangci-lint](https://golangci-lint.run/)**: installed by mise
 - **kubectl**: 1.12+ (for plugin discovery testing)
-- A reachable Kubernetes cluster for end-to-end testing (k3d, kind, minikube)
+- **[kind](https://kind.sigs.k8s.io/)** + Docker (or Colima): for end-to-end testing (`just e2e`)
 
 Bootstrap:
 
@@ -36,6 +36,10 @@ just check            # tidy + lint + test (gating recipe)
 just install          # go install ./... (binary on PATH for manual testing)
 just docs             # regenerate command reference in ./docs
 just release-snapshot # local goreleaser dry-run (no publish)
+just e2e-up           # create 2 local kind clusters + apply fixtures
+just e2e-test         # run e2e suite against clusters from e2e-up (repeatable)
+just e2e-down         # delete the e2e kind clusters
+just e2e              # full loop: up, test, always tear down after (what CI runs)
 ```
 
 `docs/` is generated from the cobra command tree, not hand-written. Run
@@ -43,8 +47,18 @@ just release-snapshot # local goreleaser dry-run (no publish)
 result. CI fails the build if `docs/` is out of sync with the code
 (`go run ./cmd/gendocs && git diff --exit-code docs`).
 
+`just e2e` builds the real binary and runs it as a subprocess against two
+real kind clusters (`fleet-e2e-a`/`fleet-e2e-b`), one seeded with a healthy
+deployment and one with a crash-looping one, so `status`/`get`/`--strict`
+are exercised against real API servers instead of fakes. It's excluded from
+`just check` (heavier: needs Docker, ~1-2 min) and runs as its own parallel
+job in CI. Tests live under `e2e/` behind a `//go:build e2e` tag, so they
+never run as part of `go test ./...`. For iterating on a single test, run
+`just e2e-up` once and then `just e2e-test` repeatedly against the same
+warm clusters; `just e2e-down` when done.
+
 `demo.gif` in the README is a staged recording (`demo.tape` + the canned
-`demo/kubectl-fleet` stub), not live cluster output — there's no multi-region
+`demo/kubectl-fleet` stub), not live cluster output: there's no multi-region
 prod fleet to record against. It mirrors the sample blocks already in
 README.md; regenerate it with `just demo` if those samples change.
 
@@ -62,6 +76,7 @@ internal/k8s/                Typed + dynamic + discovery client factory; GVR res
 internal/output/             Table/JSON/YAML printers
 internal/health/             Per-cluster summary used by `status`
 docs/                        Generated command reference (see `just docs`)
+e2e/                         Black-box tests against real kind clusters (see `just e2e`)
 ```
 
 New subcommands live in `internal/cmd/`, register in `NewRootCmd` (`root.go`), and
