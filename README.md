@@ -60,7 +60,7 @@ kubectl fleet --help
 List kubeconfig contexts with an optional parallel reachability probe.
 
 ```bash
-# raw list — no probe
+# raw list, no probe
 kubectl fleet contexts
 
 # probe every context's /version endpoint (parallel)
@@ -95,7 +95,7 @@ kubectl fleet get deploy -n payments --contexts '^prod-'
 # label selector
 kubectl fleet get pods -A -l app=ingress-nginx --contexts '^prod-'
 
-# single named resource — compare the same Deployment across clusters
+# single named resource: compare the same Deployment across clusters
 kubectl fleet get deploy api -n payments --contexts '^prod-'
 ```
 
@@ -143,17 +143,17 @@ scripting.
 `kubectl-fleet` plumbs `genericclioptions.ConfigFlags`, so the standard
 kubeconfig flags work uniformly:
 
-- `--kubeconfig <path>` — alternate kubeconfig file
-- `--context <name>` — restrict to a single context (overrides `--contexts`)
-- `--namespace <ns>` / `-n <ns>` — namespace scope for `get`
+- `--kubeconfig <path>`: alternate kubeconfig file
+- `--context <name>`: restrict to a single context (overrides `--contexts`)
+- `--namespace <ns>` / `-n <ns>`: namespace scope for `get`
 - `--user`, `--cluster`, `--token`, `--server`, etc.
 
 `KUBECONFIG` env var is honoured (colon-separated multi-file lists are merged).
 
 ## Requirements
 
-- Go **1.22+** — only when installing via `go install` or building from source
-- `kubectl` **1.12+** — for plugin discovery protocol
+- Go **1.22+** (only when installing via `go install` or building from source)
+- `kubectl` **1.12+** (for plugin discovery protocol)
 - A reachable kubeconfig with one or more contexts
 
 ## Development

@@ -1,7 +1,7 @@
 default:
     @just --list
 
-# Build the binary into ./bin/ (isolated — does not affect installed binary)
+# Build the binary into ./bin/ (isolated, does not affect installed binary)
 build:
     go build -o bin/kubectl-fleet ./cmd/kubectl-fleet
 

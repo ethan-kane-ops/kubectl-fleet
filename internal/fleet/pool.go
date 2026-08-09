@@ -34,7 +34,7 @@ func Run[T any](ctx context.Context, refs []kubeconfig.ContextRef, parallelism i
 			v, err := fn(gctx, ref)
 			results[i].Value = v
 			results[i].Err = err
-			return nil // never bubble — aggregation is in results
+			return nil // never bubble; aggregation is in results
 		})
 	}
 	_ = g.Wait()

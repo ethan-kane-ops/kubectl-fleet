@@ -18,7 +18,7 @@ type RowFn func(u *unstructured.Unstructured) (cols, wide []string)
 
 // Schema describes the per-kind column layout used by `kubectl fleet get`.
 // Headers and WideHeaders exclude the leading CONTEXT and (optional)
-// NAMESPACE columns — those are added by the caller.
+// NAMESPACE columns; those are added by the caller.
 type Schema struct {
 	Headers     []string
 	WideHeaders []string
@@ -41,7 +41,7 @@ func register(s Schema, aliases ...string) {
 
 // For returns the schema registered under any of: GVR resource plural, the
 // kind singular, or a short name. The boolean is false when no per-kind
-// schema is registered — callers should fall back to Generic().
+// schema is registered; callers should fall back to Generic().
 func For(name string) (Schema, bool) {
 	s, ok := registry[strings.ToLower(strings.TrimSpace(name))]
 	return s, ok
