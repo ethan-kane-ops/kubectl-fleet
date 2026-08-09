@@ -46,14 +46,15 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+const fixtureWaitTimeout = 2 * time.Minute
+
 // waitForFixtures blocks until cluster A's healthy Deployment is fully
 // Available and cluster B's crashing Deployment has produced at least one
 // container restart, so tests don't race the scheduler/kubelet on a
-// freshly created cluster.
+// freshly created cluster. Each cluster gets its own independent timeout:
+// a slow CI runner making cluster A's wait take most of a shared budget
+// must not starve cluster B's wait of time it never got to use.
 func waitForFixtures() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
 	csA, err := clientFor(contextA)
 	if err != nil {
 		return fmt.Errorf("client for %s: %w", contextA, err)
@@ -63,7 +64,9 @@ func waitForFixtures() error {
 		return fmt.Errorf("client for %s: %w", contextB, err)
 	}
 
-	err = wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+	ctxA, cancelA := context.WithTimeout(context.Background(), fixtureWaitTimeout)
+	defer cancelA()
+	err = wait.PollUntilContextTimeout(ctxA, 2*time.Second, fixtureWaitTimeout, true, func(ctx context.Context) (bool, error) {
 		d, err := csA.AppsV1().Deployments("payments").Get(ctx, "api", metav1.GetOptions{})
 		if err != nil {
 			return false, nil //nolint:nilerr // transient: keep polling until timeout
@@ -74,7 +77,9 @@ func waitForFixtures() error {
 		return fmt.Errorf("waiting for %s payments/api to become available: %w", contextA, err)
 	}
 
-	err = wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+	ctxB, cancelB := context.WithTimeout(context.Background(), fixtureWaitTimeout)
+	defer cancelB()
+	err = wait.PollUntilContextTimeout(ctxB, 2*time.Second, fixtureWaitTimeout, true, func(ctx context.Context) (bool, error) {
 		pods, err := csB.CoreV1().Pods("payments").List(ctx, metav1.ListOptions{LabelSelector: "app=crashy"})
 		if err != nil || len(pods.Items) == 0 {
 			return false, nil //nolint:nilerr // transient: keep polling until timeout
