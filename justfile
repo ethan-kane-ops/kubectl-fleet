@@ -94,3 +94,75 @@ release-snapshot:
 release version:
     git tag v{{version}}
     git push origin v{{version}}
+
+demo_clusters := "fleet-demo-a fleet-demo-b fleet-demo-c"
+demo_context_re := "^kind-fleet-demo-"
+
+# Create the three demo clusters and their fixtures (not itself recorded)
+#
+# Three, not the two e2e uses, because the recording exists to show fan-out and
+# two clusters can be read as a special case. They are separate from the e2e
+# pair so a recording cannot disturb a test run, or be disturbed by one.
+[doc("Create the three demo clusters and their fixtures")]
+cast-setup: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for name in {{ demo_clusters }}; do
+      if kind get clusters 2>/dev/null | grep -qx "$name"; then
+        echo "✓ cluster $name already exists"
+      else
+        kind create cluster --name "$name" --image {{ e2e_node_image }} --wait 90s
+      fi
+    done
+    for name in {{ demo_clusters }}; do
+      kubectl --context "kind-$name" apply -f e2e/fixtures/healthy.yaml >/dev/null
+    done
+    # One cluster is given a failing workload, so the fleet view has something
+    # to find. Without it every row is identical and the demo argues nothing.
+    kubectl --context kind-fleet-demo-b apply -f e2e/fixtures/crashloop.yaml >/dev/null
+    # And one is scaled differently, so the merged table shows variance between
+    # clusters rather than three copies of the same row.
+    kubectl --context kind-fleet-demo-c -n payments scale deploy/api --replicas=3 >/dev/null
+    # A container that exits immediately spends most of its early life reported
+    # as terminated/Error, and only flickers into CrashLoopBackOff around each
+    # restart. e2e polls for that flicker; a recording cannot, so wait for the
+    # kubelet's backoff to grow long enough that CrashLoopBackOff is the
+    # steady state. Recording before that lands puts a column of zeroes under a
+    # caption saying one cluster is unhealthy.
+    #
+    # Stable means observed on consecutive polls, not once. The first sighting
+    # is exactly the flicker that is not good enough here.
+    echo "▶ waiting for the crashloop to settle (needs the backoff to grow; ~5m)"
+    stable=0
+    while [ "$stable" -lt 4 ]; do
+      if ./bin/kubectl-fleet status --contexts '{{ demo_context_re }}' 2>/dev/null \
+        | awk 'NR>1 && $6>0 {f=1} END{exit !f}'; then
+        stable=$((stable + 1))
+      else
+        stable=0
+      fi
+      sleep 5
+    done
+    echo "✓ ready to record"
+
+# Record the demo cast that ships on the site
+#
+# --idle-time-limit trims the pauses between commands without altering the
+# timestamps. The cast is not committed here: it ships in the site repo, next
+# to the page that embeds it.
+[doc("Record the demo cast that ships on the site")]
+cast out="kubectl-fleet.cast":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -f {{ out }}
+    asciinema rec {{ out }} \
+      --window-size 96x30 \
+      --idle-time-limit 2 \
+      --command demo/demo-cast.sh
+    echo "✓ recorded {{ out }} — copy it to the site repo's public/casts/"
+
+# Delete the three demo clusters
+[doc("Delete the three demo clusters")]
+cast-down:
+    #!/usr/bin/env bash
+    for name in {{ demo_clusters }}; do kind delete cluster --name "$name"; done

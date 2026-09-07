@@ -7,3 +7,5 @@ coverage.txt
 .DS_Store
 .env
 .env.local
+kubectl-fleet.cast
+*.cast
