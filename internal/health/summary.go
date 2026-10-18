@@ -111,10 +111,23 @@ func isNodeReady(n *corev1.Node) bool {
 	return false
 }
 
+// isCrashLoop reports a pod with a container, init containers included, that
+// keeps exiting. The API shows such a container two ways depending on when it
+// is read: Waiting/CrashLoopBackOff during the kubelet's back-off, and
+// Terminated with a non-zero exit in the gap between an exit and the back-off
+// starting. A fast-failing container spends most of its first minutes in the
+// second, so checking only the first reports a looping pod as healthy.
+// RestartCount > 0 keeps out a container that failed once and is not being
+// restarted, such as a Job's pod under restartPolicy Never.
 func isCrashLoop(p *corev1.Pod) bool {
-	for _, cs := range p.Status.ContainerStatuses {
-		if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
-			return true
+	for _, list := range [][]corev1.ContainerStatus{p.Status.InitContainerStatuses, p.Status.ContainerStatuses} {
+		for _, cs := range list {
+			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+				return true
+			}
+			if t := cs.State.Terminated; t != nil && t.ExitCode != 0 && cs.RestartCount > 0 {
+				return true
+			}
 		}
 	}
 	return false

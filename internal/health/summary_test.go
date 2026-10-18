@@ -125,3 +125,35 @@ func TestSummarize_WindowDisabled(t *testing.T) {
 		t.Errorf("PodsRestartedInWindow = %d want 0 (window disabled)", s.PodsRestartedInWindow)
 	}
 }
+
+func TestIsCrashLoop(t *testing.T) {
+	terminated := func(exit int32, restarts int32) corev1.ContainerStatus {
+		return corev1.ContainerStatus{
+			RestartCount: restarts,
+			State:        corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: exit, Reason: "Error"}},
+		}
+	}
+	backoff := corev1.ContainerStatus{
+		RestartCount: 3,
+		State:        corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+	}
+	cases := []struct {
+		name string
+		init []corev1.ContainerStatus
+		main []corev1.ContainerStatus
+		want bool
+	}{
+		{"back-off", nil, []corev1.ContainerStatus{backoff}, true},
+		{"between restarts", nil, []corev1.ContainerStatus{terminated(1, 3)}, true},
+		{"init container looping", []corev1.ContainerStatus{terminated(1, 2)}, nil, true},
+		{"failed once, not restarted", nil, []corev1.ContainerStatus{terminated(1, 0)}, false},
+		{"completed after restarts", nil, []corev1.ContainerStatus{terminated(0, 2)}, false},
+		{"running", nil, []corev1.ContainerStatus{{State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}, false},
+	}
+	for _, c := range cases {
+		p := &corev1.Pod{Status: corev1.PodStatus{InitContainerStatuses: c.init, ContainerStatuses: c.main}}
+		if got := isCrashLoop(p); got != c.want {
+			t.Errorf("%s: isCrashLoop = %v want %v", c.name, got, c.want)
+		}
+	}
+}

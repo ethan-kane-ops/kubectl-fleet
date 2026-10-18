@@ -123,16 +123,12 @@ cast-setup: build
     # And one is scaled differently, so the merged table shows variance between
     # clusters rather than three copies of the same row.
     kubectl --context kind-fleet-demo-c -n payments scale deploy/api --replicas=3 >/dev/null
-    # A container that exits immediately spends most of its early life reported
-    # as terminated/Error, and only flickers into CrashLoopBackOff around each
-    # restart. e2e polls for that flicker; a recording cannot, so wait for the
-    # kubelet's backoff to grow long enough that CrashLoopBackOff is the
-    # steady state. Recording before that lands puts a column of zeroes under a
-    # caption saying one cluster is unhealthy.
-    #
-    # Stable means observed on consecutive polls, not once. The first sighting
-    # is exactly the flicker that is not good enough here.
-    echo "▶ waiting for the crashloop to settle (needs the backoff to grow; ~5m)"
+    # CRASHLOOP counts both the back-off and the terminated/Error gap between
+    # restarts, but the container is briefly Running after each restart and
+    # reads as healthy then. Wait until the count holds on consecutive polls,
+    # so the recording does not catch that moment and show a column of zeroes
+    # under a caption saying one cluster is unhealthy.
+    echo "▶ waiting for the crashloop to show steadily"
     stable=0
     while [ "$stable" -lt 4 ]; do
       if ./bin/kubectl-fleet status --contexts '{{ demo_context_re }}' 2>/dev/null \
