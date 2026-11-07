@@ -7,7 +7,7 @@ testing, and the conventions enforced on every PR.
 
 Required tooling:
 
-- **Go**: version pinned in `go.mod` (≥ 1.22)
+- **Go**: version pinned in `go.mod`
 - **[mise](https://mise.jdx.dev/)**: runtime manager (`brew install mise` on macOS)
 - **[just](https://just.systems/)**: task runner (installed by mise)
 - **[golangci-lint](https://golangci-lint.run/)**: installed by mise

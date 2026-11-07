@@ -30,7 +30,9 @@ prod-ap-1    v1.30.6      4/4     97     0         0
 # detect OS + arch (handles macOS arm64 vs linux aarch64 → arm64)
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
-VERSION="0.1.0"
+# latest release tag without the leading "v"; set VERSION by hand to pin one
+VERSION="$(curl -fsSL https://api.github.com/repos/ethan-kane-ops/kubectl-fleet/releases/latest \
+  | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')"
 
 curl -L -o /tmp/kubectl-fleet.tar.gz \
   "https://github.com/ethan-kane-ops/kubectl-fleet/releases/download/v${VERSION}/kubectl-fleet_v${VERSION}_${OS}_${ARCH}.tar.gz"
@@ -183,7 +185,7 @@ kubeconfig flags work uniformly:
 
 ## Requirements
 
-- Go **1.22+** (only when installing via `go install` or building from source)
+- Go at the version in `go.mod` (only when installing via `go install` or building from source)
 - `kubectl` **1.12+** (for plugin discovery protocol)
 - A reachable kubeconfig with one or more contexts
 
