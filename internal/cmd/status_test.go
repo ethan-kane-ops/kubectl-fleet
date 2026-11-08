@@ -41,7 +41,7 @@ func TestStatusWithoutStrictSucceeds(t *testing.T) {
 	if err := c.Execute(); err != nil {
 		t.Fatalf("cluster errors should only land in the table without --strict: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "warn: prod:") {
+	if !strings.Contains(stderr.String(), "1 of 1 contexts failed") {
 		t.Errorf("stderr should warn about the failed context: %q", stderr.String())
 	}
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,16 +52,22 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			wideHeaders := []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"}
 			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: o.noHeaders}
 
-			records := make([]statusRecord, 0, len(results))
+			records := make([]statusRecord, 0, len(results)+len(sel.failures))
+			// Contexts --where could not read are failures too; JSON carries
+			// them as error records alongside the ones the work itself hit.
+			for _, f := range sel.failures {
+				records = append(records, statusRecord{Context: f.Context, Error: f.Err.Error()})
+			}
 			for _, res := range results {
 				if res.Err != nil {
 					records = append(records, statusRecord{Context: res.Context, Error: res.Err.Error()})
-					row := []string{res.Context, "?", "?", "?", "?", "?"}
-					if since > 0 {
-						row = append(row, "?")
+					if o.errors {
+						row := []string{res.Context, "?", "?", "?", "?", "?"}
+						if since > 0 {
+							row = append(row, "?")
+						}
+						tbl.Append(row, []string{"?", "?", "", res.Err.Error()})
 					}
-					tbl.Append(row, []string{"?", "?", "", res.Err.Error()})
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
 					continue
 				}
 				s := res.Value
@@ -83,6 +90,10 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					"",
 				})
 			}
+			sort.Slice(records, func(i, j int) bool { return records[i].Context < records[j].Context })
+			if o.errors {
+				promoteErrorColumn(tbl)
+			}
 			if f.Structured() {
 				err = output.Encode(cmd.OutOrStdout(), records, f)
 			} else {
@@ -91,17 +102,12 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sel.report(cmd.ErrOrStderr())
-			if o.strict {
-				if n := fleet.CountErrors(results) + len(sel.failures); n > 0 {
-					return fmt.Errorf("%d of %d contexts failed", n, len(results)+len(sel.failures))
-				}
-			}
-			return nil
+			return o.finish(cmd.ErrOrStderr(), sel, fleet.Failures(results), len(refs))
 		},
 	}
 	c.Flags().DurationVar(&since, "since", 0, "if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)")
 	o.addFlags(c, defaultParallelism)
+	o.addErrorsFlag(c)
 	return c
 }
 

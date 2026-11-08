@@ -146,9 +146,11 @@ prod-us-1    payments     api-7d4f6c5b9-fghij           4d
 prod-ap-1    payments     api-9b2a4e1d3-klmno           1h
 ```
 
-Failed clusters never abort the run. Per-context errors land in the table with
-`<error>` in the `NAME` column (left out of `-o name|json|yaml`) and surface a `warn:`
-line on stderr. Without `-n` or `-A`, each context is queried in its own
+Failed clusters never abort the run. A one-line summary on stderr counts them
+and groups them by cause (`warn: 3 of 40 contexts failed: 2 timed out
+(prod-eu-3, prod-eu-7), 1 forbidden (dev-a). Use --errors for details.`).
+`--errors` adds an `<error>` row with an `ERROR` column per failed context
+(never in `-o name|json|yaml`) and one `warn:` line each. Without `-n` or `-A`, each context is queried in its own
 namespace, falling back to `default`. `get <kind> <name>` skips contexts that
 don't have the object and errors only when none of them do. With `-A`, it
 finds the name in every namespace of every context.

@@ -72,7 +72,7 @@ func New(src Source) (*Clients, error) {
 // without waiting for the cache to expire.
 func ResolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.GroupVersionResource, namespaced bool, err error) {
 	gvr, namespaced, err = resolveGVR(disco, kind)
-	if errors.Is(err, errKindNotFound) {
+	if errors.Is(err, ErrKindNotFound) {
 		if cached, ok := disco.(discovery.CachedDiscoveryInterface); ok && !cached.Fresh() {
 			cached.Invalidate()
 			return resolveGVR(disco, kind)
@@ -81,7 +81,9 @@ func ResolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.Gro
 	return gvr, namespaced, err
 }
 
-var errKindNotFound = errors.New("not found in cluster")
+// ErrKindNotFound reports that a cluster serves no resource matching the
+// requested kind.
+var ErrKindNotFound = errors.New("not found in cluster")
 
 func resolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.GroupVersionResource, namespaced bool, err error) {
 	gr := schema.ParseGroupResource(kind)
@@ -119,9 +121,9 @@ func resolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.Gro
 		// With partial discovery the kind may live in a group that failed
 		// (a down aggregated API), so the discovery error is the real cause.
 		if listErr != nil {
-			return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q %w (discovery incomplete: %w)", kind, errKindNotFound, listErr)
+			return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q %w (discovery incomplete: %w)", kind, ErrKindNotFound, listErr)
 		}
-		return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q %w", kind, errKindNotFound)
+		return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q %w", kind, ErrKindNotFound)
 	}
 	return best.gvr, best.namespaced, nil
 }

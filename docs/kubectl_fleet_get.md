@@ -11,6 +11,7 @@ kubectl fleet get <kind> [name] [flags]
 ```
   -A, --all-namespaces      query across all namespaces
       --contexts string     regex selecting kubeconfig contexts by name (default: all)
+      --errors              show each failed context: an <error> row with its ERROR text, and one warning line per failure (default: a one-line summary)
       --exclude string      regex of context names to leave out, applied after --contexts
   -h, --help                help for get
       --no-headers          suppress header row in table/wide output

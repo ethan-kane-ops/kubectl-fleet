@@ -145,7 +145,7 @@ func TestResolveGVRPartialDiscovery(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "metrics.k8s.io/v1beta1") {
 		t.Fatalf("want the discovery failure in the error, got %v", err)
 	}
-	if !errors.Is(err, errKindNotFound) {
-		t.Errorf("error should still wrap errKindNotFound: %v", err)
+	if !errors.Is(err, ErrKindNotFound) {
+		t.Errorf("error should still wrap ErrKindNotFound: %v", err)
 	}
 }

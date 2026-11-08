@@ -55,11 +55,12 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 
 			for _, res := range results {
 				if res.Err != nil {
-					tbl.Append(
-						[]string{res.Context, "k8s-server", "<error>"},
-						[]string{"", "", "", res.Err.Error()},
-					)
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
+					if o.errors {
+						tbl.Append(
+							[]string{res.Context, "k8s-server", "<error>"},
+							[]string{"", "", "", res.Err.Error()},
+						)
+					}
 					continue
 				}
 				v := res.Value
@@ -68,20 +69,18 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					[]string{v.GitCommit, v.BuildDate, v.Platform, ""},
 				)
 			}
+			if o.errors {
+				promoteErrorColumn(tbl)
+			}
 			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
 				return err
 			}
-			sel.report(cmd.ErrOrStderr())
-			if o.strict {
-				if n := fleet.CountErrors(results) + len(sel.failures); n > 0 {
-					return fmt.Errorf("%d of %d contexts failed", n, len(results)+len(sel.failures))
-				}
-			}
-			return nil
+			return o.finish(cmd.ErrOrStderr(), sel, fleet.Failures(results), len(refs))
 		},
 	}
 	c.Flags().BoolVar(&clientOnly, "client", false, "show client version only, skip cluster probes")
 	o.addFlags(c, defaultParallelism)
+	o.addErrorsFlag(c)
 	c.Flags().Lookup("strict").Usage = "exit non-zero if any context failed (ignored with --client)"
 	return c
 }

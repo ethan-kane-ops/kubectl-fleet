@@ -31,6 +31,7 @@ type fleetOptions struct {
 	output      string
 	noHeaders   bool
 	where       []string
+	errors      bool
 }
 
 func (o *fleetOptions) addFlags(c *cobra.Command, defaultParallelism int) {
@@ -42,6 +43,23 @@ func (o *fleetOptions) addFlags(c *cobra.Command, defaultParallelism int) {
 	f.StringVarP(&o.output, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	f.BoolVar(&o.noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	f.StringArrayVar(&o.where, "where", nil, "filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable")
+}
+
+// addErrorsFlag registers --errors on the commands that summarise failures.
+func (o *fleetOptions) addErrorsFlag(c *cobra.Command) {
+	c.Flags().BoolVar(&o.errors, "errors", false, "show each failed context: an <error> row with its ERROR text, and one warning line per failure (default: a one-line summary)")
+}
+
+// finish reports every failure (from --where and from the work itself) and
+// applies --strict. attempted is how many contexts the work ran against.
+func (o *fleetOptions) finish(w io.Writer, sel selection, work []fleet.Failure, attempted int) error {
+	failures := append(append([]fleet.Failure(nil), sel.failures...), work...)
+	total := attempted + len(sel.failures)
+	reportFailures(w, total, failures, sel.skippedUnreachable, o.errors)
+	if o.strict && len(failures) > 0 {
+		return fmt.Errorf("%d of %d contexts failed", len(failures), total)
+	}
+	return nil
 }
 
 func (o *fleetOptions) format() (output.Format, error) {
@@ -176,21 +194,5 @@ func countNodes(ctx context.Context, restCfg *rest.Config) (int, error) {
 			return n, nil
 		}
 		opts.Continue = list.Continue
-	}
-}
-
-// report prints each context --where could not read, and how many
-// unreachable contexts it skipped.
-func (s selection) report(w io.Writer) {
-	for _, f := range s.failures {
-		_, _ = fmt.Fprintf(w, "warn: %s: %v\n", f.Context, f.Err)
-	}
-	reportSkipped(w, s.skippedUnreachable)
-}
-
-// reportSkipped notes contexts that --where reachable left out.
-func reportSkipped(w io.Writer, n int) {
-	if n > 0 {
-		_, _ = fmt.Fprintf(w, "warn: skipped %d unreachable\n", n)
 	}
 }
