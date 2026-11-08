@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
@@ -155,5 +156,22 @@ func TestContextsJSON(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, `"CONTEXT": "prod"`) {
 		t.Errorf("json missing CONTEXT=prod:\n%s", out)
+	}
+}
+
+func TestContextsCheckTimeoutIsPerContext(t *testing.T) {
+	// Three 400ms probes run one at a time take 1.2s in total. Each fits a 1s
+	// timeout, so all must report reachable.
+	var ctxs []fakeContext
+	for _, name := range []string{"a", "b", "c"} {
+		cl := &fakeCluster{delay: 400 * time.Millisecond}
+		ctxs = append(ctxs, fakeContext{name: name, server: cl.start(t)})
+	}
+	c := newContextsCmd(newFlags(writeFakeKubeconfig(t, ctxs...)))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"--check", "--strict", "--parallelism", "1", "--timeout", "1s"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("every probe fits its own timeout: %v", err)
 	}
 }
