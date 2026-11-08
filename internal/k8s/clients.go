@@ -100,6 +100,11 @@ func resolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.Gro
 		}
 	}
 	if best == nil {
+		// With partial discovery the kind may live in a group that failed
+		// (a down aggregated API), so the discovery error is the real cause.
+		if listErr != nil {
+			return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q %w (discovery incomplete: %w)", kind, errKindNotFound, listErr)
+		}
 		return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q %w", kind, errKindNotFound)
 	}
 	return best.gvr, best.namespaced, nil
