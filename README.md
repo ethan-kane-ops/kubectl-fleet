@@ -184,7 +184,8 @@ Every command honours `-o`:
 - `contexts`, `version`: one object per table row, keyed by column header.
 
 Failed contexts are left out of `get`'s `json`, `yaml` and `name` output and
-reported on stderr instead.
+reported on stderr instead. `-o name` joins fields with `/`, so it is ambiguous for
+context names that contain one (EKS ARNs, for example); use `-o json` there.
 
 ```bash
 kubectl fleet get deploy -A -o json \
@@ -211,6 +212,10 @@ API server warnings, such as deprecated API versions, print to stderr once
 per context as `warn: <context>: <message>`.
 
 `KUBECONFIG` env var is honoured (colon-separated multi-file lists are merged).
+
+Contexts run in parallel (`--parallelism`, default 8). If your credential
+plugins prompt interactively (MFA codes, browser SSO), run with
+`--parallelism 1` so the prompts don't interleave.
 
 ## Requirements
 
