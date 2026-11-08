@@ -96,7 +96,10 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 						prefix = append(prefix, u.GetNamespace())
 					}
 					tbl.Append(append(prefix, cols...), append(wide, ""))
-					list.Items = append(list.Items, withContext(u, res.Context))
+					if f.Structured() {
+						annotateContext(u, res.Context)
+						list.Items = append(list.Items, *u)
+					}
 				}
 			}
 			if name != "" && found == 0 {
@@ -142,17 +145,16 @@ func newFleetList() *unstructured.UnstructuredList {
 	}}
 }
 
-// withContext returns a copy of u annotated with the context it came from, so
-// objects with the same name on different clusters stay distinguishable.
-func withContext(u *unstructured.Unstructured, ctxName string) unstructured.Unstructured {
-	out := u.DeepCopy()
-	ann := out.GetAnnotations()
+// annotateContext records on u the context it came from, so objects with the
+// same name on different clusters stay distinguishable. u is owned by this
+// run, so it is annotated in place rather than copied.
+func annotateContext(u *unstructured.Unstructured, ctxName string) {
+	ann := u.GetAnnotations()
 	if ann == nil {
 		ann = map[string]string{}
 	}
 	ann[ContextAnnotation] = ctxName
-	out.SetAnnotations(ann)
-	return *out
+	u.SetAnnotations(ann)
 }
 
 // schemaForResults picks a per-kind schema for the group and resource the
