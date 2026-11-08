@@ -85,7 +85,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			req := getRequest{kind: kind, name: name, selector: labelSelector, allNamespaces: allNamespaces, format: f}
 			results := fleet.Run(cmd.Context(), refs, parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
-					return getOne(ctx, kubeFlags, r, req)
+					return getOne(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), req)
 				})
 
 			schema, namespaced, chosen := schemaForResults(kind, results)
@@ -234,9 +234,8 @@ func appendErrorRow(tbl *output.Table, ctx string, namespaced bool, s printers.S
 // projects each object into req.format as it arrives. Without -A the
 // namespace is resolved per context: --namespace, else that context's own
 // namespace, else "default".
-func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, req getRequest) (fetchedResource, error) {
-	cf := kubeconfig.ForContext(kubeFlags, r.Name)
-	clients, err := k8s.New(cf)
+func getOne(ctx context.Context, kc *kubeconfig.Context, req getRequest) (fetchedResource, error) {
+	clients, err := k8s.New(kc)
 	if err != nil {
 		return fetchedResource{}, err
 	}
@@ -247,7 +246,7 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource, group: gvr.Group}
 	ns := ""
 	if namespaced && !req.allNamespaces {
-		if ns, err = kubeconfig.Namespace(cf); err != nil {
+		if ns, err = kc.Namespace(); err != nil {
 			return out, err
 		}
 	}
@@ -256,7 +255,7 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 	add := func(u *unstructured.Unstructured) error {
 		out.count++
 		if req.format.Structured() {
-			annotateContext(u, r.Name)
+			annotateContext(u, kc.Name())
 			b, err := json.Marshal(u.Object)
 			if err != nil {
 				return fmt.Errorf("encode %s/%s: %w", gvr.Resource, u.GetName(), err)

@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -24,11 +23,17 @@ type Clients struct {
 	Discovery discovery.DiscoveryInterface
 }
 
-// New builds a Clients from a REST client getter, typically the per-context
-// ConfigFlags from kubeconfig.ForContext. Discovery goes through the getter's
-// disk-cached client, the same cache and rate limits kubectl uses.
-func New(getter genericclioptions.RESTClientGetter) (*Clients, error) {
-	restCfg, err := getter.ToRESTConfig()
+// Source supplies a context's REST config and cached discovery client;
+// kubeconfig.Context implements it.
+type Source interface {
+	ToRESTConfig() (*rest.Config, error)
+	ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error)
+}
+
+// New builds a Clients from a Source, typically kubeconfig.ForContext.
+// Discovery goes through the source's disk-cached client.
+func New(src Source) (*Clients, error) {
+	restCfg, err := src.ToRESTConfig()
 	if err != nil {
 		return nil, fmt.Errorf("rest config: %w", err)
 	}
@@ -46,7 +51,7 @@ func New(getter genericclioptions.RESTClientGetter) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dynamic client: %w", err)
 	}
-	disco, err := getter.ToDiscoveryClient()
+	disco, err := src.ToDiscoveryClient()
 	if err != nil {
 		return nil, fmt.Errorf("discovery client: %w", err)
 	}

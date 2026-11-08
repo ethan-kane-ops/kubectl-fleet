@@ -5,14 +5,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/discovery"
+	diskcached "k8s.io/client-go/discovery/cached/disk"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/client-go/util/homedir"
 )
 
 // ContextRef is a flattened view of a single kubeconfig context.
@@ -24,12 +30,9 @@ type ContextRef struct {
 }
 
 // Load returns the merged kubeconfig respecting --kubeconfig + KUBECONFIG env.
+// It is the only place the kubeconfig is parsed; ForContext works from it.
 func Load(kubeFlags *genericclioptions.ConfigFlags) (*clientcmdapi.Config, error) {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	if kubeFlags != nil && kubeFlags.KubeConfig != nil && *kubeFlags.KubeConfig != "" {
-		rules.ExplicitPath = *kubeFlags.KubeConfig
-	}
-	cfg, err := rules.Load()
+	cfg, err := loadingRules(kubeFlags).Load()
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig: %w", err)
 	}
@@ -77,57 +80,159 @@ func Select(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, 
 	return []ContextRef{{Name: name, Cluster: c.Cluster, Namespace: c.Namespace, AuthInfo: c.AuthInfo}}, nil
 }
 
-// Client-side rate limits per context. Discovery keeps cli-runtime's burst
-// of 300.
+// Client-side rate limits per context. Discovery keeps kubectl's burst of
+// 300.
 const (
-	requestQPS   = 50
-	requestBurst = 100
-	discoveryQPS = 50
+	requestQPS     = 50
+	requestBurst   = 100
+	discoveryQPS   = 50
+	discoveryBurst = 300
+	discoveryTTL   = 6 * time.Hour
 )
 
-// ForContext returns ConfigFlags pinned to ctxName that carry every global
-// kubectl flag the user set (--as, --token, --request-timeout, --cache-dir,
-// ...). Each context gets its own persistent copy: the kubeconfig is parsed
-// once per context and its discovery client is shared by every caller of
-// that copy, so callers should build it once and reuse it.
-func ForContext(kubeFlags *genericclioptions.ConfigFlags, ctxName string) *genericclioptions.ConfigFlags {
-	f := genericclioptions.NewConfigFlags(true).WithDiscoveryQPS(discoveryQPS)
+// Context builds clients for one kubeconfig context from the kubeconfig
+// parsed once by Load, so a fleet of N contexts costs one parse, not N. It
+// applies every global kubectl flag the user set (--as, --request-timeout,
+// --cache-dir, ...) and is safe for concurrent use.
+type Context struct {
+	name     string
+	cc       clientcmd.ClientConfig
+	cacheDir string
+	wrap     func(*rest.Config) *rest.Config
+
+	discoOnce sync.Once
+	disco     discovery.CachedDiscoveryInterface
+	discoErr  error
+}
+
+// ForContext returns the Context for ctxName in cfg (from Load).
+func ForContext(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, ctxName string) *Context {
+	rules := loadingRules(kubeFlags)
+	overrides := overridesFrom(kubeFlags)
+	overrides.CurrentContext = ctxName
+	c := &Context{
+		name: ctxName,
+		// rules is only the ConfigAccess that persists refreshed auth-provider
+		// tokens; nothing is re-read from disk.
+		cc:       clientcmd.NewNonInteractiveClientConfig(*cfg, ctxName, overrides, rules),
+		cacheDir: defaultCacheDir(),
+	}
 	if kubeFlags != nil {
-		f.CacheDir = kubeFlags.CacheDir
-		f.KubeConfig = kubeFlags.KubeConfig
-		f.Namespace = kubeFlags.Namespace
-		f.Insecure = kubeFlags.Insecure
-		f.CertFile = kubeFlags.CertFile
-		f.KeyFile = kubeFlags.KeyFile
-		f.CAFile = kubeFlags.CAFile
-		f.BearerToken = kubeFlags.BearerToken
-		f.Impersonate = kubeFlags.Impersonate
-		f.ImpersonateUID = kubeFlags.ImpersonateUID
-		f.ImpersonateGroup = kubeFlags.ImpersonateGroup
-		f.Username = kubeFlags.Username
-		f.Password = kubeFlags.Password
-		f.Timeout = kubeFlags.Timeout
-		f.DisableCompression = kubeFlags.DisableCompression
-	}
-	var userWrap func(*rest.Config) *rest.Config
-	if kubeFlags != nil {
-		userWrap = kubeFlags.WrapConfigFn
-	}
-	f.WrapConfigFn = func(c *rest.Config) *rest.Config {
-		if userWrap != nil {
-			c = userWrap(c)
+		if kubeFlags.CacheDir != nil && *kubeFlags.CacheDir != "" {
+			c.cacheDir = *kubeFlags.CacheDir
 		}
-		c.WarningHandler = serverWarnings.forContext(ctxName)
-		// client-go defaults to 5 QPS / burst 10, which throttles paging a
-		// large cluster (100 pages for 50k pods). The limiter is per context,
-		// so a higher rate does not multiply across the fleet.
-		if c.QPS == 0 {
-			c.QPS, c.Burst = requestQPS, requestBurst
-		}
-		return c
+		c.wrap = kubeFlags.WrapConfigFn
 	}
-	f.Context = &ctxName
-	return f
+	return c
+}
+
+// Name is the kubeconfig context name.
+func (c *Context) Name() string { return c.name }
+
+// ToRESTConfig returns a REST config for the context.
+func (c *Context) ToRESTConfig() (*rest.Config, error) {
+	rc, err := c.cc.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("rest config for context %q: %w", c.name, err)
+	}
+	if c.wrap != nil {
+		rc = c.wrap(rc)
+	}
+	rc.WarningHandler = serverWarnings.forContext(c.name)
+	// client-go defaults to 5 QPS / burst 10, which throttles paging a large
+	// cluster (100 pages for 50k pods). The limiter is per context, so a
+	// higher rate does not multiply across the fleet.
+	if rc.QPS == 0 {
+		rc.QPS, rc.Burst = requestQPS, requestBurst
+	}
+	return rc, nil
+}
+
+// ToDiscoveryClient returns the context's disk-cached discovery client, in
+// the same cache directory kubectl uses, built once per Context.
+func (c *Context) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
+	c.discoOnce.Do(func() {
+		rc, err := c.ToRESTConfig()
+		if err != nil {
+			c.discoErr = err
+			return
+		}
+		rc.QPS, rc.Burst = discoveryQPS, discoveryBurst
+		c.disco, c.discoErr = diskcached.NewCachedDiscoveryClientForConfig(rc,
+			discoveryCacheDir(filepath.Join(c.cacheDir, "discovery"), rc.Host),
+			filepath.Join(c.cacheDir, "http"), discoveryTTL)
+	})
+	return c.disco, c.discoErr
+}
+
+// Namespace returns the namespace a namespaced request should use:
+// --namespace, else the context's namespace, else "default".
+func (c *Context) Namespace() (string, error) {
+	ns, _, err := c.cc.Namespace()
+	if err != nil {
+		return "", fmt.Errorf("namespace for context %q: %w", c.name, err)
+	}
+	return ns, nil
+}
+
+func loadingRules(kubeFlags *genericclioptions.ConfigFlags) *clientcmd.ClientConfigLoadingRules {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if kubeFlags != nil && kubeFlags.KubeConfig != nil && *kubeFlags.KubeConfig != "" {
+		rules.ExplicitPath = *kubeFlags.KubeConfig
+	}
+	return rules
+}
+
+// overridesFrom maps the global kubectl flags onto client config overrides,
+// as cli-runtime's ConfigFlags does. --cluster, --user, --server and
+// --tls-server-name are absent: ValidateFleetFlags rejects them.
+func overridesFrom(f *genericclioptions.ConfigFlags) *clientcmd.ConfigOverrides {
+	o := &clientcmd.ConfigOverrides{ClusterDefaults: clientcmd.ClusterDefaults}
+	if f == nil {
+		return o
+	}
+	set := func(dst *string, src *string) {
+		if src != nil {
+			*dst = *src
+		}
+	}
+	set(&o.AuthInfo.ClientCertificate, f.CertFile)
+	set(&o.AuthInfo.ClientKey, f.KeyFile)
+	set(&o.AuthInfo.Token, f.BearerToken)
+	set(&o.AuthInfo.Impersonate, f.Impersonate)
+	set(&o.AuthInfo.ImpersonateUID, f.ImpersonateUID)
+	set(&o.AuthInfo.Username, f.Username)
+	set(&o.AuthInfo.Password, f.Password)
+	set(&o.ClusterInfo.CertificateAuthority, f.CAFile)
+	set(&o.Context.Namespace, f.Namespace)
+	set(&o.Timeout, f.Timeout)
+	if f.ImpersonateGroup != nil {
+		o.AuthInfo.ImpersonateGroups = *f.ImpersonateGroup
+	}
+	if f.Insecure != nil {
+		o.ClusterInfo.InsecureSkipTLSVerify = *f.Insecure
+	}
+	if f.DisableCompression != nil {
+		o.ClusterInfo.DisableCompression = *f.DisableCompression
+	}
+	return o
+}
+
+// defaultCacheDir mirrors kubectl: $KUBECACHEDIR, else ~/.kube/cache.
+func defaultCacheDir() string {
+	if d := os.Getenv("KUBECACHEDIR"); d != "" {
+		return d
+	}
+	return filepath.Join(homedir.HomeDir(), ".kube", "cache")
+}
+
+var unsafeCacheChars = regexp.MustCompile(`[^(\w/.)]`)
+
+// discoveryCacheDir mirrors kubectl's per-host directory naming so the two
+// share one discovery cache.
+func discoveryCacheDir(parent, host string) string {
+	h := strings.Replace(strings.Replace(host, "https://", "", 1), "http://", "", 1)
+	return filepath.Join(parent, unsafeCacheChars.ReplaceAllString(h, "_"))
 }
 
 // serverWarnings prints API server warnings (deprecated APIs and the like)
@@ -196,25 +301,4 @@ func ValidateFleetFlags(kubeFlags *genericclioptions.ConfigFlags) error {
 		}
 	}
 	return nil
-}
-
-// RESTConfigFor returns a REST config for a specific context, honoring the
-// global kubectl flags as ForContext describes.
-func RESTConfigFor(kubeFlags *genericclioptions.ConfigFlags, ctxName string) (*rest.Config, error) {
-	restCfg, err := ForContext(kubeFlags, ctxName).ToRESTConfig()
-	if err != nil {
-		return nil, fmt.Errorf("rest config for context %q: %w", ctxName, err)
-	}
-	return restCfg, nil
-}
-
-// Namespace returns the namespace a namespaced request through cf (from
-// ForContext) should use: --namespace, else the context's namespace, else
-// "default".
-func Namespace(cf *genericclioptions.ConfigFlags) (string, error) {
-	ns, _, err := cf.ToRawKubeConfigLoader().Namespace()
-	if err != nil {
-		return "", fmt.Errorf("namespace for context %q: %w", *cf.Context, err)
-	}
-	return ns, nil
 }

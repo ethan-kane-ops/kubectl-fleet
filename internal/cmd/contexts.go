@@ -49,7 +49,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			var probes []fleet.ClusterResult[reach]
 			if probe {
 				probes = fleet.Run(cmd.Context(), refs, parallelism, func(_ context.Context, r kubeconfig.ContextRef) (reach, error) {
-					return probeOne(kubeFlags, r, timeout)
+					return probeOne(kubeconfig.ForContext(kubeFlags, cfg, r.Name), timeout)
 				})
 			}
 			for i, r := range refs {
@@ -96,8 +96,8 @@ type reach struct {
 
 // probeOne times a /version call against one context. The timeout is applied
 // per request, so contexts queued behind --parallelism get the full budget.
-func probeOne(kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, timeout time.Duration) (reach, error) {
-	restCfg, err := kubeconfig.RESTConfigFor(kubeFlags, r.Name)
+func probeOne(kc *kubeconfig.Context, timeout time.Duration) (reach, error) {
+	restCfg, err := kc.ToRESTConfig()
 	if err != nil {
 		return reach{}, err
 	}
