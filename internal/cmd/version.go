@@ -10,7 +10,6 @@ import (
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/buildinfo"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/fleet"
-	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
 )
@@ -101,11 +100,11 @@ func clientRow() ([]string, []string) {
 }
 
 func probeServerVersion(kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef) (*version.Info, error) {
-	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
+	disco, err := kubeconfig.ForContext(kubeFlags, r.Name).ToDiscoveryClient()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("discovery client: %w", err)
 	}
-	v, err := clients.Discovery.ServerVersion()
+	v, err := disco.ServerVersion()
 	if err != nil {
 		return nil, fmt.Errorf("server version: %w", err)
 	}
