@@ -47,3 +47,50 @@ func TestGetCmdNoMatchingContexts(t *testing.T) {
 		t.Fatalf("expected no-matching-contexts error, got %v", err)
 	}
 }
+
+func TestGetResolvesNamespacePerContext(t *testing.T) {
+	a, b := &fakeCluster{}, &fakeCluster{}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "a", server: a.start(t), namespace: "team-a"},
+		fakeContext{name: "b", server: b.start(t)},
+	)
+	cases := []struct {
+		name  string
+		args  []string
+		wantA string
+		wantB string
+	}{
+		{"context namespaces", []string{"pods"}, "/api/v1/namespaces/team-a/pods", "/api/v1/namespaces/default/pods"},
+		{"--namespace overrides every context", []string{"pods", "-n", "ops"}, "/api/v1/namespaces/ops/pods", "/api/v1/namespaces/ops/pods"},
+		{"-A lists cluster-wide", []string{"pods", "-A"}, "/api/v1/pods", "/api/v1/pods"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewRootCmd()
+			c.SetOut(&bytes.Buffer{})
+			c.SetErr(&bytes.Buffer{})
+			c.SetArgs(append([]string{"get", "--kubeconfig", path, "--cache-dir", t.TempDir()}, tc.args...))
+			if err := c.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			for _, chk := range []struct {
+				cl   *fakeCluster
+				want string
+			}{{a, tc.wantA}, {b, tc.wantB}} {
+				if !requested(chk.cl, chk.want) {
+					t.Errorf("no request to %s; got %v", chk.want, chk.cl.paths())
+				}
+			}
+		})
+	}
+}
+
+// requested reports whether cl saw a request for path, ignoring the query.
+func requested(cl *fakeCluster, path string) bool {
+	for _, p := range cl.paths() {
+		if strings.SplitN(p, "?", 2)[0] == path {
+			return true
+		}
+	}
+	return false
+}
