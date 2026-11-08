@@ -67,10 +67,25 @@ func Contexts(cfg *clientcmdapi.Config, filter string) ([]ContextRef, error) {
 }
 
 // Select returns the contexts a command runs against: only --context when it
-// is set (overriding filter), otherwise Contexts(cfg, filter).
-func Select(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, filter string) ([]ContextRef, error) {
+// is set (overriding include and exclude), otherwise the contexts matching
+// the include regex minus those matching the exclude regex.
+func Select(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, include, exclude string) ([]ContextRef, error) {
 	if kubeFlags == nil || kubeFlags.Context == nil || *kubeFlags.Context == "" {
-		return Contexts(cfg, filter)
+		refs, err := Contexts(cfg, include)
+		if err != nil || exclude == "" {
+			return refs, err
+		}
+		re, err := regexp.Compile(exclude)
+		if err != nil {
+			return nil, fmt.Errorf("compile --exclude %q: %w", exclude, err)
+		}
+		kept := refs[:0]
+		for _, r := range refs {
+			if !re.MatchString(r.Name) {
+				kept = append(kept, r)
+			}
+		}
+		return kept, nil
 	}
 	name := *kubeFlags.Context
 	c, ok := cfg.Contexts[name]

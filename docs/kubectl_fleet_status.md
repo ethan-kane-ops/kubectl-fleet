@@ -9,11 +9,12 @@ kubectl fleet status [flags]
 ### Options
 
 ```
-      --contexts string   regex applied to context names
+      --contexts string   regex selecting kubeconfig contexts by name (default: all)
+      --exclude string    regex of context names to leave out, applied after --contexts
   -h, --help              help for status
       --no-headers        suppress header row in table/wide output
   -o, --output string     output format: table|wide|json|yaml|name (default "table")
-      --parallelism int   max parallel cluster calls (0=unbounded) (default 32)
+      --parallelism int   max contexts queried at once (0=unbounded) (default 32)
       --since duration    if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)
       --strict            exit non-zero if any context failed
 ```

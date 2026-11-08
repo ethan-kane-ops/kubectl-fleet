@@ -16,25 +16,21 @@ import (
 
 func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		clientOnly  bool
-		filter      string
-		parallelism int
-		outputFlag  string
-		noHeaders   bool
-		strict      bool
+		o          fleetOptions
+		clientOnly bool
 	)
 	c := &cobra.Command{
 		Use:   "version",
 		Short: "Print plugin and per-cluster Kubernetes server versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f, err := output.ParseFormat(outputFlag)
+			f, err := o.format()
 			if err != nil {
 				return err
 			}
 			tbl := &output.Table{
 				Headers:     []string{"CONTEXT", "COMPONENT", "VERSION"},
 				WideHeaders: []string{"GIT_COMMIT", "BUILD_DATE", "PLATFORM", "ERROR"},
-				NoHeaders:   noHeaders,
+				NoHeaders:   o.noHeaders,
 			}
 			tbl.Append(clientRow())
 
@@ -46,7 +42,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			refs, err := kubeconfig.Select(kubeFlags, cfg, filter)
+			refs, err := o.selectContexts(kubeFlags, cfg)
 			if err != nil {
 				return err
 			}
@@ -54,7 +50,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				return fmt.Errorf("no matching contexts")
 			}
 
-			results := fleet.Run(cmd.Context(), refs, parallelism,
+			results := fleet.Run(cmd.Context(), refs, o.parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (*version.Info, error) {
 					return probeServerVersion(kubeconfig.ForContext(kubeFlags, cfg, r.Name))
 				})
@@ -77,7 +73,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
 				return err
 			}
-			if strict {
+			if o.strict {
 				if n := fleet.CountErrors(results); n > 0 {
 					return fmt.Errorf("%d of %d contexts failed", n, len(results))
 				}
@@ -86,11 +82,8 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&clientOnly, "client", false, "show client version only, skip cluster probes")
-	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", defaultParallelism, "max parallel cluster calls (0=unbounded)")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
-	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
-	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed (ignored with --client)")
+	o.addFlags(c, defaultParallelism)
+	c.Flags().Lookup("strict").Usage = "exit non-zero if any context failed (ignored with --client)"
 	return c
 }
 

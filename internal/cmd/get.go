@@ -51,13 +51,9 @@ type getRequest struct {
 
 func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		filter        string
-		parallelism   int
+		o             fleetOptions
 		labelSelector string
 		allNamespaces bool
-		outputFlag    string
-		noHeaders     bool
-		strict        bool
 		serverPrint   bool
 	)
 	c := &cobra.Command{
@@ -73,7 +69,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if name != "" && labelSelector != "" {
 				return fmt.Errorf("a resource name cannot be combined with --selector")
 			}
-			f, err := output.ParseFormat(outputFlag)
+			f, err := o.format()
 			if err != nil {
 				return err
 			}
@@ -81,7 +77,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			refs, err := kubeconfig.Select(kubeFlags, cfg, filter)
+			refs, err := o.selectContexts(kubeFlags, cfg)
 			if err != nil {
 				return err
 			}
@@ -112,7 +108,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				failed    int
 				writeErr  error
 			)
-			fleet.Stream(cmd.Context(), refs, parallelism, fetch, func(res fleet.ClusterResult[fetchedResource]) {
+			fleet.Stream(cmd.Context(), refs, o.parallelism, fetch, func(res fleet.ClusterResult[fetchedResource]) {
 				// Rows are projected with each context's own schema; a context
 				// that resolves the kind to another group/resource than the
 				// first successful one would not line up, so it is reported.
@@ -156,25 +152,22 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			case f.Structured():
 				err = writeList(cmd.OutOrStdout(), encoded, f)
 			default:
-				err = output.Print(cmd.OutOrStdout(), buildGetTable(kind, collected, f, noHeaders), f)
+				err = output.Print(cmd.OutOrStdout(), buildGetTable(kind, collected, f, o.noHeaders), f)
 			}
 			if err != nil {
 				return err
 			}
-			if strict && failed > 0 {
+			if o.strict && failed > 0 {
 				return fmt.Errorf("%d of %d contexts failed", failed, len(refs))
 			}
 			return nil
 		},
 	}
-	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", defaultGetParallelism, "max parallel cluster calls (0=unbounded); each in-flight context holds a page of up to 500 decoded objects")
 	c.Flags().StringVarP(&labelSelector, "selector", "l", "", "label selector")
 	c.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "query across all namespaces")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
-	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
-	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
 	c.Flags().BoolVar(&serverPrint, "server-print", true, "let each API server render the table columns, as kubectl does; false uses built-in columns")
+	o.addFlags(c, defaultGetParallelism)
+	c.Flags().Lookup("parallelism").Usage = "max contexts queried at once (0=unbounded); each in-flight context holds a page of up to 500 decoded objects"
 	return c
 }
 

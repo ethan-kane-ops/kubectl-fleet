@@ -236,7 +236,7 @@ func TestSelect(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := genericclioptions.NewConfigFlags(true)
 			f.Context = &tc.context
-			refs, err := Select(f, cfg, tc.filter)
+			refs, err := Select(f, cfg, tc.filter, "")
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, tc.wantErr)
 			}
@@ -337,5 +337,48 @@ func TestDiscoveryCacheDirMatchesKubectl(t *testing.T) {
 		if got := discoveryCacheDir("/c", host); got != want {
 			t.Errorf("discoveryCacheDir(%q)=%q want %q", host, got, want)
 		}
+	}
+}
+
+func TestSelectExclude(t *testing.T) {
+	cfg, err := Load(flagsWith(writeFixture(t)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cases := []struct {
+		name             string
+		context          string
+		include, exclude string
+		want             []string
+		wantErr          string
+	}{
+		{"exclude after include", "", "^(prod|dev)$", "^dev$", []string{"prod"}, ""},
+		{"exclude alone", "", "", "^st", []string{"dev", "prod"}, ""},
+		{"exclude everything", "", "", ".", nil, ""},
+		{"bad exclude regex", "", "", "(", nil, "--exclude"},
+		{"--context ignores both", "stage", "^prod$", "stage", []string{"stage"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := genericclioptions.NewConfigFlags(true)
+			f.Context = &tc.context
+			refs, err := Select(f, cfg, tc.include, tc.exclude)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want error naming %s, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+			var got []string
+			for _, r := range refs {
+				got = append(got, r.Name)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("got %v want %v", got, tc.want)
+			}
+		})
 	}
 }

@@ -18,18 +18,14 @@ import (
 
 func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		filter      string
-		parallelism int
-		outputFlag  string
-		since       time.Duration
-		noHeaders   bool
-		strict      bool
+		o     fleetOptions
+		since time.Duration
 	)
 	c := &cobra.Command{
 		Use:   "status",
 		Short: "Per-cluster health summary across kubeconfig contexts",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			f, err := output.ParseFormat(outputFlag)
+			f, err := o.format()
 			if err != nil {
 				return err
 			}
@@ -37,7 +33,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			refs, err := kubeconfig.Select(kubeFlags, cfg, filter)
+			refs, err := o.selectContexts(kubeFlags, cfg)
 			if err != nil {
 				return err
 			}
@@ -45,7 +41,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				return fmt.Errorf("no matching contexts")
 			}
 			opts := health.Options{Since: since}
-			results := fleet.Run(cmd.Context(), refs, parallelism,
+			results := fleet.Run(cmd.Context(), refs, o.parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (health.Summary, error) {
 					return statusOne(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), opts)
 				})
@@ -55,7 +51,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				headers = append(headers, "RESTARTS_"+shortDuration(since))
 			}
 			wideHeaders := []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"}
-			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: noHeaders}
+			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: o.noHeaders}
 
 			records := make([]statusRecord, 0, len(results))
 			for _, res := range results {
@@ -97,7 +93,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if strict {
+			if o.strict {
 				if n := fleet.CountErrors(results); n > 0 {
 					return fmt.Errorf("%d of %d contexts failed", n, len(results))
 				}
@@ -105,12 +101,8 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", defaultParallelism, "max parallel cluster calls (0=unbounded)")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().DurationVar(&since, "since", 0, "if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)")
-	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
-	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
+	o.addFlags(c, defaultParallelism)
 	return c
 }
 

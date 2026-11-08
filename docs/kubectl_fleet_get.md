@@ -10,11 +10,12 @@ kubectl fleet get <kind> [name] [flags]
 
 ```
   -A, --all-namespaces    query across all namespaces
-      --contexts string   regex applied to context names
+      --contexts string   regex selecting kubeconfig contexts by name (default: all)
+      --exclude string    regex of context names to leave out, applied after --contexts
   -h, --help              help for get
       --no-headers        suppress header row in table/wide output
   -o, --output string     output format: table|wide|json|yaml|name (default "table")
-      --parallelism int   max parallel cluster calls (0=unbounded); each in-flight context holds a page of up to 500 decoded objects (default 16)
+      --parallelism int   max contexts queried at once (0=unbounded); each in-flight context holds a page of up to 500 decoded objects (default 16)
   -l, --selector string   label selector
       --server-print      let each API server render the table columns, as kubectl does; false uses built-in columns (default true)
       --strict            exit non-zero if any context failed
