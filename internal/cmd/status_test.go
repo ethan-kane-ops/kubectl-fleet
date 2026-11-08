@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/health"
 )
@@ -90,5 +91,22 @@ func TestStatusStructuredOutput(t *testing.T) {
 	}
 	if _, ok := upRec["error"]; ok {
 		t.Errorf("healthy context should have no error key: %v", upRec)
+	}
+}
+
+func TestShortDuration(t *testing.T) {
+	cases := map[time.Duration]string{
+		time.Hour:                    "1h",
+		90 * time.Minute:             "1h30m",
+		5 * time.Minute:              "5m",
+		90 * time.Second:             "1m30s",
+		30 * time.Second:             "30s",
+		time.Hour + 5*time.Second:    "1h0m5s",
+		25*time.Hour + 2*time.Minute: "25h2m",
+	}
+	for d, want := range cases {
+		if got := shortDuration(d); got != want {
+			t.Errorf("shortDuration(%v)=%q want %q", d, got, want)
+		}
 	}
 }

@@ -2,12 +2,16 @@ package health
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/version"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -97,7 +101,7 @@ func podWithRestart(ns, name string, terminatedAt time.Time) *corev1.Pod {
 	}
 }
 
-func TestSummarize_PodsRestartedInWindow(t *testing.T) {
+func TestSummarize_ContainersRestartedInWindow(t *testing.T) {
 	now := time.Now()
 	cs := fake.NewSimpleClientset(
 		podWithRestart("default", "recent-1", now.Add(-2*time.Minute)),
@@ -109,8 +113,8 @@ func TestSummarize_PodsRestartedInWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
-	if s.PodsRestartedInWindow != 2 {
-		t.Errorf("PodsRestartedInWindow = %d want 2", s.PodsRestartedInWindow)
+	if s.ContainersRestartedInWindow != 2 {
+		t.Errorf("ContainersRestartedInWindow = %d want 2", s.ContainersRestartedInWindow)
 	}
 }
 
@@ -122,8 +126,8 @@ func TestSummarize_WindowDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
-	if s.PodsRestartedInWindow != 0 {
-		t.Errorf("PodsRestartedInWindow = %d want 0 (window disabled)", s.PodsRestartedInWindow)
+	if s.ContainersRestartedInWindow != 0 {
+		t.Errorf("ContainersRestartedInWindow = %d want 0 (window disabled)", s.ContainersRestartedInWindow)
 	}
 }
 
@@ -201,5 +205,24 @@ func TestSummarizeNoisyNamespaces(t *testing.T) {
 				t.Errorf("top noisy=%+v want %+v", s.TopNoisyNS, tc.want)
 			}
 		})
+	}
+}
+
+type failingVersion struct{ discovery.DiscoveryInterface }
+
+func (failingVersion) ServerVersion() (*version.Info, error) {
+	return nil, errors.New("connection refused")
+}
+
+func TestSummarizeFailsWhenVersionFails(t *testing.T) {
+	cs := fake.NewSimpleClientset(node("n1", true))
+	_, err := Summarize(context.Background(), cs, failingVersion{cs.Discovery()}, Options{})
+	if err == nil || !strings.Contains(err.Error(), "server version: connection refused") {
+		t.Fatalf("want server version error, got %v", err)
+	}
+	for _, a := range cs.Actions() {
+		if a.GetVerb() == "list" {
+			t.Errorf("listed %s after version failed", a.GetResource().Resource)
+		}
 	}
 }

@@ -52,7 +52,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 
 			headers := []string{"CONTEXT", "VERSION", "NODES", "PODS", "PENDING", "CRASHLOOP"}
 			if since > 0 {
-				headers = append(headers, "RESTARTS_"+since.String())
+				headers = append(headers, "RESTARTS_"+shortDuration(since))
 			}
 			wideHeaders := []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"}
 			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: noHeaders}
@@ -80,7 +80,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					fmt.Sprintf("%d", s.PodsCrashLoop),
 				}
 				if since > 0 {
-					row = append(row, fmt.Sprintf("%d", s.PodsRestartedInWindow))
+					row = append(row, fmt.Sprintf("%d", s.ContainersRestartedInWindow))
 				}
 				tbl.Append(row, []string{
 					fmt.Sprintf("%d", s.PodsFailed),
@@ -128,6 +128,18 @@ func statusOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r 
 		return health.Summary{}, err
 	}
 	return health.Summarize(ctx, clients.Typed, clients.Discovery, opts)
+}
+
+// shortDuration drops zero trailing units: 1h0m0s -> 1h, 5m0s -> 5m.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 func formatNoisy(ns []health.NamespaceNoise) string {
