@@ -86,6 +86,10 @@ e2e: e2e-up
     trap 'just e2e-down' EXIT
     just e2e-test
 
+# Scale regression check against fake fleets (memory budgets, row counts); -scale 0.1 for a quick run
+loadtest *args: build
+    go run ./hack/loadtest -bin bin/kubectl-fleet {{args}}
+
 # Dry-run a goreleaser build locally (no publish)
 release-snapshot:
     goreleaser release --snapshot --clean

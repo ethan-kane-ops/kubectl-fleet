@@ -77,6 +77,7 @@ internal/output/             Table/JSON/YAML printers
 internal/health/             Per-cluster summary used by `status`
 docs/                        Generated command reference (see `just docs`)
 e2e/                         Black-box tests against real kind clusters (see `just e2e`)
+hack/loadtest/               Scale regression check against fake fleets (see `just loadtest`)
 ```
 
 New subcommands live in `internal/cmd/`, register in `NewRootCmd` (`root.go`), and
