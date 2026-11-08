@@ -27,15 +27,11 @@ func TestE2E_Get(t *testing.T) {
 		t.Errorf("expected an api deployment row from %s, got %+v", contextA, rows)
 	}
 
-	// payments/api only exists on cluster A; cluster B should surface a
-	// per-context <error> row rather than aborting the whole command.
-	var sawBError bool
+	// payments/api only exists on cluster A. Absent from B is not an error,
+	// so B contributes no row at all.
 	for _, r := range rows {
-		if r["CONTEXT"] == contextB && r["NAME"] == "<error>" {
-			sawBError = true
+		if r["CONTEXT"] == contextB {
+			t.Errorf("expected no row from %s (api doesn't exist there), got %+v", contextB, r)
 		}
-	}
-	if !sawBError {
-		t.Errorf("expected an <error> row from %s (api doesn't exist there), got %+v", contextB, rows)
 	}
 }
