@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 )
 
 func TestGetCmdArgs(t *testing.T) {
@@ -177,8 +178,8 @@ func TestListsArePaged(t *testing.T) {
 			}
 		}},
 		{"status", func() *cobra.Command { return newStatusCmd(newFlags(path)) }, []string{"-o", "json"}, func(t *testing.T, out string) {
-			if !strings.Contains(out, `"TOTAL_PODS": "600"`) {
-				t.Errorf("want TOTAL_PODS 600 in:\n%s", out)
+			if !strings.Contains(out, `"podsTotal": 600`) {
+				t.Errorf("want podsTotal 600 in:\n%s", out)
 			}
 		}},
 	}
@@ -202,6 +203,54 @@ func TestListsArePaged(t *testing.T) {
 			}
 			if pages != 2 {
 				t.Errorf("pod list requests with limit=500: %d want 2", pages)
+			}
+		})
+	}
+}
+
+func TestGetStructuredOutputIsAListOfObjects(t *testing.T) {
+	a := &fakeCluster{pods: []fakePod{{"default", "web"}}}
+	b := &fakeCluster{pods: []fakePod{{"default", "web"}}}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "a", server: a.start(t)},
+		fakeContext{name: "b", server: b.start(t)},
+		fakeContext{name: "down", server: "http://127.0.0.1:1"},
+	)
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			c := newGetCmd(newFlags(path))
+			var stdout bytes.Buffer
+			c.SetOut(&stdout)
+			c.SetErr(&bytes.Buffer{})
+			c.SetArgs([]string{"pods", "-o", format})
+			if err := c.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			var list struct {
+				Kind  string `json:"kind"`
+				Items []struct {
+					Kind     string `json:"kind"`
+					Metadata struct {
+						Name        string            `json:"name"`
+						Annotations map[string]string `json:"annotations"`
+					} `json:"metadata"`
+				} `json:"items"`
+			}
+			if err := yaml.Unmarshal(stdout.Bytes(), &list); err != nil {
+				t.Fatalf("decode: %v\n%s", err, stdout.String())
+			}
+			if list.Kind != "List" {
+				t.Errorf("kind=%q want List", list.Kind)
+			}
+			var got []string
+			for _, it := range list.Items {
+				if it.Kind != "Pod" || it.Metadata.Name != "web" {
+					t.Errorf("unexpected item %+v", it)
+				}
+				got = append(got, it.Metadata.Annotations[ContextAnnotation])
+			}
+			if strings.Join(got, ",") != "a,b" {
+				t.Errorf("item contexts=%v want [a b], failed context left out", got)
 			}
 		})
 	}

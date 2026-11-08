@@ -182,12 +182,12 @@ func run(t *testing.T, kubeconfigPath string, args ...string) (stdout, stderr st
 	return out.String(), errOut.String(), code
 }
 
-func runJSON(t *testing.T, args ...string) ([]map[string]string, int) {
+func runJSON[T any](t *testing.T, args ...string) (T, int) {
 	t.Helper()
 	out, stderr, code := run(t, kubeconfig, append(args, "-o", "json")...)
-	var rows []map[string]string
-	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+	var v T
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
 		t.Fatalf("invalid json (stderr=%s): %v\n%s", stderr, err, out)
 	}
-	return rows, code
+	return v, code
 }

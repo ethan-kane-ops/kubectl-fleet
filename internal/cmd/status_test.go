@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -46,8 +47,8 @@ func TestStatusWithoutStrictSucceeds(t *testing.T) {
 
 func TestFormatNoisy(t *testing.T) {
 	in := []health.NamespaceNoise{
-		{Namespace: "kube-system", NonRunning: 3},
-		{Namespace: "default", NonRunning: 1},
+		{Namespace: "kube-system", Unhealthy: 3},
+		{Namespace: "default", Unhealthy: 1},
 	}
 	got := formatNoisy(in)
 	want := "kube-system(3),default(1)"
@@ -56,5 +57,38 @@ func TestFormatNoisy(t *testing.T) {
 	}
 	if formatNoisy(nil) != "" {
 		t.Error("nil should be empty")
+	}
+}
+
+func TestStatusStructuredOutput(t *testing.T) {
+	up := &fakeCluster{pods: []fakePod{{"default", "a"}, {"default", "b"}}}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "down", server: "http://127.0.0.1:1"},
+		fakeContext{name: "up", server: up.start(t)},
+	)
+	c := newStatusCmd(newFlags(path))
+	var stdout bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&bytes.Buffer{})
+	c.SetArgs([]string{"-o", "json"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var records []map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &records); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	if len(records) != 2 {
+		t.Fatalf("records=%d want 2:\n%s", len(records), stdout.String())
+	}
+	down, upRec := records[0], records[1]
+	if down["context"] != "down" || down["error"] == nil || down["podsTotal"] != nil {
+		t.Errorf("failed context should carry only context and error: %v", down)
+	}
+	if upRec["context"] != "up" || upRec["podsTotal"] != float64(2) || upRec["serverVersion"] != "v1.31.0" {
+		t.Errorf("healthy context record: %v", upRec)
+	}
+	if _, ok := upRec["error"]; ok {
+		t.Errorf("healthy context should have no error key: %v", upRec)
 	}
 }

@@ -62,7 +62,7 @@ func TestSummarize(t *testing.T) {
 	if s.PodsTotal != 7 {
 		t.Errorf("total=%d want 7", s.PodsTotal)
 	}
-	if len(s.TopNoisyNS) == 0 || s.TopNoisyNS[0].Namespace != "kube-system" || s.TopNoisyNS[0].NonRunning != 3 {
+	if len(s.TopNoisyNS) == 0 || s.TopNoisyNS[0].Namespace != "kube-system" || s.TopNoisyNS[0].Unhealthy != 3 {
 		t.Errorf("top noisy: %+v want kube-system=3 first", s.TopNoisyNS)
 	}
 }
