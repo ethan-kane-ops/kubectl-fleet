@@ -35,24 +35,28 @@ func nodeRow(u *unstructured.Unstructured) ([]string, []string) {
 	return cols, wide
 }
 
+// nodeStatus follows `kubectl get node`: Ready, NotReady, or Unknown when
+// the Ready condition is missing, then SchedulingDisabled for a cordoned
+// node. Unlike kubectl it also appends any True pressure condition
+// (DiskPressure, MemoryPressure, ...), a triage signal worth seeing fleet-wide.
 func nodeStatus(obj map[string]interface{}) string {
-	// Combine condition states. NotReady wins; Ready maps to "Ready"; other
-	// problematic conditions (MemoryPressure, DiskPressure, etc.) append.
-	ready := false
+	state := "Unknown"
 	var extras []string
 	for _, c := range sliceFromObj(obj, "status", "conditions") {
 		m := asMap(c)
 		t, _ := m["type"].(string)
 		s, _ := m["status"].(string)
-		if t == "Ready" {
-			ready = s == "True"
-		} else if s == "True" {
+		switch {
+		case t == "Ready" && s == "True":
+			state = "Ready"
+		case t == "Ready":
+			state = "NotReady"
+		case s == "True":
 			extras = append(extras, t)
 		}
 	}
-	state := "Ready"
-	if !ready {
-		state = "NotReady"
+	if unschedulable, _, _ := unstructured.NestedBool(obj, "spec", "unschedulable"); unschedulable {
+		state += ",SchedulingDisabled"
 	}
 	if len(extras) > 0 {
 		sort.Strings(extras)
