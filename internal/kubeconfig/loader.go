@@ -77,12 +77,21 @@ func Select(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, 
 	return []ContextRef{{Name: name, Cluster: c.Cluster, Namespace: c.Namespace, AuthInfo: c.AuthInfo}}, nil
 }
 
+// Client-side rate limits per context. Discovery keeps cli-runtime's burst
+// of 300.
+const (
+	requestQPS   = 50
+	requestBurst = 100
+	discoveryQPS = 50
+)
+
 // ForContext returns ConfigFlags pinned to ctxName that carry every global
 // kubectl flag the user set (--as, --token, --request-timeout, --cache-dir,
-// ...). The copy is non-persistent so each context resolves its own client
-// config, discovery cache and namespace.
+// ...). Each context gets its own persistent copy: the kubeconfig is parsed
+// once per context and its discovery client is shared by every caller of
+// that copy, so callers should build it once and reuse it.
 func ForContext(kubeFlags *genericclioptions.ConfigFlags, ctxName string) *genericclioptions.ConfigFlags {
-	f := genericclioptions.NewConfigFlags(false)
+	f := genericclioptions.NewConfigFlags(true).WithDiscoveryQPS(discoveryQPS)
 	if kubeFlags != nil {
 		f.CacheDir = kubeFlags.CacheDir
 		f.KubeConfig = kubeFlags.KubeConfig
@@ -109,6 +118,12 @@ func ForContext(kubeFlags *genericclioptions.ConfigFlags, ctxName string) *gener
 			c = userWrap(c)
 		}
 		c.WarningHandler = serverWarnings.forContext(ctxName)
+		// client-go defaults to 5 QPS / burst 10, which throttles paging a
+		// large cluster (100 pages for 50k pods). The limiter is per context,
+		// so a higher rate does not multiply across the fleet.
+		if c.QPS == 0 {
+			c.QPS, c.Burst = requestQPS, requestBurst
+		}
 		return c
 	}
 	f.Context = &ctxName
@@ -193,12 +208,13 @@ func RESTConfigFor(kubeFlags *genericclioptions.ConfigFlags, ctxName string) (*r
 	return restCfg, nil
 }
 
-// NamespaceFor returns the namespace a namespaced request against ctxName
-// should use: --namespace, else the context's namespace, else "default".
-func NamespaceFor(kubeFlags *genericclioptions.ConfigFlags, ctxName string) (string, error) {
-	ns, _, err := ForContext(kubeFlags, ctxName).ToRawKubeConfigLoader().Namespace()
+// Namespace returns the namespace a namespaced request through cf (from
+// ForContext) should use: --namespace, else the context's namespace, else
+// "default".
+func Namespace(cf *genericclioptions.ConfigFlags) (string, error) {
+	ns, _, err := cf.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
-		return "", fmt.Errorf("namespace for context %q: %w", ctxName, err)
+		return "", fmt.Errorf("namespace for context %q: %w", *cf.Context, err)
 	}
 	return ns, nil
 }

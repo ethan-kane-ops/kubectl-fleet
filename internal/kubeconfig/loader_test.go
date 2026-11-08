@@ -128,7 +128,7 @@ func TestRESTConfigForMissingContext(t *testing.T) {
 	}
 }
 
-func TestNamespaceFor(t *testing.T) {
+func TestNamespace(t *testing.T) {
 	path := writeFixture(t)
 	cases := []struct {
 		name   string
@@ -145,9 +145,9 @@ func TestNamespaceFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := flagsWith(path)
 			f.Namespace = &tc.flagNS
-			got, err := NamespaceFor(f, tc.ctx)
+			got, err := Namespace(ForContext(f, tc.ctx))
 			if err != nil {
-				t.Fatalf("NamespaceFor: %v", err)
+				t.Fatalf("Namespace: %v", err)
 			}
 			if got != tc.want {
 				t.Errorf("got %q want %q", got, tc.want)
@@ -278,5 +278,15 @@ func TestServerWarningsPrintedOncePerContext(t *testing.T) {
 	}
 	if wrapped != 4 {
 		t.Errorf("user WrapConfigFn ran %d times, want 4", wrapped)
+	}
+}
+
+func TestForContextRateLimits(t *testing.T) {
+	rc, err := RESTConfigFor(flagsWith(writeFixture(t)), "prod")
+	if err != nil {
+		t.Fatalf("RESTConfigFor: %v", err)
+	}
+	if rc.QPS != requestQPS || rc.Burst != requestBurst {
+		t.Errorf("qps=%v burst=%d want %v/%d", rc.QPS, rc.Burst, requestQPS, requestBurst)
 	}
 }
