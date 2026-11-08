@@ -332,3 +332,101 @@ func TestNodeRow_notReadyWithPressure(t *testing.T) {
 func newUnstructured(content map[string]interface{}) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: content}
 }
+
+func TestPodStatus(t *testing.T) {
+	type m = map[string]interface{}
+	type l = []interface{}
+	running := m{"running": m{}}
+	done := m{"terminated": m{"reason": "Completed", "exitCode": int64(0)}}
+	cases := []struct {
+		name   string
+		meta   m
+		spec   m
+		status m
+		want   string
+	}{
+		{
+			name:   "finished init container does not mask Running",
+			spec:   m{"initContainers": l{m{"name": "init"}}},
+			status: m{"phase": "Running", "initContainerStatuses": l{m{"state": done}}, "containerStatuses": l{m{"ready": true, "state": running}}},
+			want:   "Running",
+		},
+		{
+			name:   "init container still running",
+			spec:   m{"initContainers": l{m{"name": "a"}, m{"name": "b"}}},
+			status: m{"phase": "Pending", "initContainerStatuses": l{m{"state": done}, m{"state": running}}},
+			want:   "Init:1/2",
+		},
+		{
+			name:   "init container crashlooping",
+			spec:   m{"initContainers": l{m{"name": "a"}}},
+			status: m{"phase": "Pending", "initContainerStatuses": l{m{"state": m{"waiting": m{"reason": "CrashLoopBackOff"}}}}},
+			want:   "Init:CrashLoopBackOff",
+		},
+		{
+			name:   "init container failed without a reason",
+			spec:   m{"initContainers": l{m{"name": "a"}}},
+			status: m{"phase": "Pending", "initContainerStatuses": l{m{"state": m{"terminated": m{"exitCode": int64(3)}}}}},
+			want:   "Init:ExitCode:3",
+		},
+		{
+			name:   "waiting PodInitializing counts as in progress",
+			spec:   m{"initContainers": l{m{"name": "a"}}},
+			status: m{"phase": "Pending", "initContainerStatuses": l{m{"state": m{"waiting": m{"reason": "PodInitializing"}}}}},
+			want:   "Init:0/1",
+		},
+		{
+			name:   "started native sidecar does not hold initialisation",
+			spec:   m{"initContainers": l{m{"name": "proxy", "restartPolicy": "Always"}}},
+			status: m{"phase": "Running", "initContainerStatuses": l{m{"started": true, "state": running}}, "containerStatuses": l{m{"ready": true, "state": running}}},
+			want:   "Running",
+		},
+		{
+			name:   "evicted pod shows status.reason",
+			status: m{"phase": "Failed", "reason": "Evicted"},
+			want:   "Evicted",
+		},
+		{
+			name:   "completed job pod",
+			status: m{"phase": "Succeeded", "containerStatuses": l{m{"state": done}}},
+			want:   "Completed",
+		},
+		{
+			name:   "one container completed while another runs",
+			status: m{"phase": "Running", "containerStatuses": l{m{"state": done}, m{"ready": true, "state": running}}},
+			want:   "Running",
+		},
+		{
+			name:   "killed by signal",
+			status: m{"phase": "Running", "containerStatuses": l{m{"state": m{"terminated": m{"signal": int64(9), "exitCode": int64(137)}}}}},
+			want:   "Signal:9",
+		},
+		{
+			name:   "pending delete shows Terminating",
+			meta:   m{"deletionTimestamp": "2026-01-01T00:00:00Z"},
+			status: m{"phase": "Running", "containerStatuses": l{m{"ready": true, "state": running}}},
+			want:   "Terminating",
+		},
+		{
+			name:   "pending delete on a lost node shows Unknown",
+			meta:   m{"deletionTimestamp": "2026-01-01T00:00:00Z"},
+			status: m{"phase": "Running", "reason": "NodeLost"},
+			want:   "Unknown",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			meta := m{"name": "p"}
+			for k, v := range tc.meta {
+				meta[k] = v
+			}
+			spec := m{"containers": l{m{"name": "c"}}}
+			for k, v := range tc.spec {
+				spec[k] = v
+			}
+			if got := podStatus(m{"metadata": meta, "spec": spec, "status": tc.status}); got != tc.want {
+				t.Errorf("status=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
