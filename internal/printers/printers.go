@@ -20,6 +20,10 @@ type RowFn func(u *unstructured.Unstructured) (cols, wide []string)
 // Headers and WideHeaders exclude the leading CONTEXT and (optional)
 // NAMESPACE columns; those are added by the caller.
 type Schema struct {
+	// Group is the API group of the kind the schema renders ("" for core).
+	// Resources with the same name in other groups (pods.metrics.k8s.io)
+	// must not borrow its columns.
+	Group       string
 	Headers     []string
 	WideHeaders []string
 	Row         RowFn
@@ -45,6 +49,16 @@ func register(s Schema, aliases ...string) {
 func For(name string) (Schema, bool) {
 	s, ok := registry[strings.ToLower(strings.TrimSpace(name))]
 	return s, ok
+}
+
+// ForGroupResource returns the schema for resource (plural, singular or
+// short name) only when it was registered for the same API group.
+func ForGroupResource(group, resource string) (Schema, bool) {
+	s, ok := For(resource)
+	if !ok || s.Group != group {
+		return Schema{}, false
+	}
+	return s, true
 }
 
 // Generic returns the default schema used when no per-kind schema exists.

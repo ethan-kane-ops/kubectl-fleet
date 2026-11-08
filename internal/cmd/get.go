@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/tools/pager"
 
@@ -24,6 +25,7 @@ type fetchedResource struct {
 	items      []unstructured.Unstructured
 	namespaced bool
 	resource   string
+	group      string
 }
 
 func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
@@ -153,38 +155,27 @@ func withContext(u *unstructured.Unstructured, ctxName string) unstructured.Unst
 	return *out
 }
 
-// schemaForResults picks a per-kind schema based on the resolved GVR resource
-// from the first successful cluster. Falls back to the user-supplied alias,
-// then to printers.Generic. When no cluster succeeded the per-kind schema's
-// own Namespaced declaration drives whether the NAMESPACE column renders.
+// schemaForResults picks a per-kind schema for the group and resource the
+// first successful cluster resolved, else printers.Generic. When no cluster
+// succeeded it falls back to the user's input (alias or resource.group) and
+// the schema's own Namespaced declaration.
 func schemaForResults(kind string, results []fleet.ClusterResult[fetchedResource]) (printers.Schema, bool) {
-	var resource string
-	var liveNamespaced bool
-	var anySuccess bool
 	for _, r := range results {
 		if r.Err == nil && r.Value.resource != "" {
-			resource = r.Value.resource
-			liveNamespaced = r.Value.namespaced
-			anySuccess = true
-			break
+			if s, ok := printers.ForGroupResource(r.Value.group, r.Value.resource); ok {
+				return s, r.Value.namespaced
+			}
+			return printers.Generic(), r.Value.namespaced
 		}
 	}
-	if resource != "" {
-		if s, ok := printers.For(resource); ok {
-			return s, liveNamespaced
-		}
+	s, ok := printers.For(kind)
+	if gr := schema.ParseGroupResource(kind); gr.Group != "" {
+		s, ok = printers.ForGroupResource(gr.Group, gr.Resource)
 	}
-	if s, ok := printers.For(kind); ok {
-		if anySuccess {
-			return s, liveNamespaced
-		}
-		return s, s.Namespaced
+	if !ok {
+		s = printers.Generic()
 	}
-	g := printers.Generic()
-	if anySuccess {
-		return g, liveNamespaced
-	}
-	return g, g.Namespaced
+	return s, s.Namespaced
 }
 
 func buildTable(s printers.Schema, namespaced bool) *output.Table {
@@ -229,7 +220,7 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 	if err != nil {
 		return fetchedResource{}, err
 	}
-	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource}
+	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource, group: gvr.Group}
 	ns := ""
 	if namespaced && !allNS {
 		if ns, err = kubeconfig.NamespaceFor(kubeFlags, r.Name); err != nil {

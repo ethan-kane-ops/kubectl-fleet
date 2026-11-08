@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
+
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/fleet"
 )
 
 func TestGetCmdArgs(t *testing.T) {
@@ -253,6 +256,34 @@ func TestGetStructuredOutputIsAListOfObjects(t *testing.T) {
 			}
 			if strings.Join(got, ",") != "a,b" {
 				t.Errorf("item contexts=%v want [a b], failed context left out", got)
+			}
+		})
+	}
+}
+
+func TestSchemaForResultsMatchesGroup(t *testing.T) {
+	ok := func(group, resource string) []fleet.ClusterResult[fetchedResource] {
+		return []fleet.ClusterResult[fetchedResource]{{Context: "c", Value: fetchedResource{group: group, resource: resource, namespaced: true}}}
+	}
+	failed := []fleet.ClusterResult[fetchedResource]{{Context: "c", Err: errors.New("down")}}
+	cases := []struct {
+		name      string
+		kind      string
+		results   []fleet.ClusterResult[fetchedResource]
+		wantFirst string
+	}{
+		{"core pods get pod columns", "pods", ok("", "pods"), "READY"},
+		{"metrics pods fall back to generic", "pods.metrics.k8s.io", ok("metrics.k8s.io", "pods"), "AGE"},
+		{"apps deployments get deployment columns", "deploy", ok("apps", "deployments"), "READY"},
+		{"no success, alias", "po", failed, "READY"},
+		{"no success, other group", "nodes.metrics.k8s.io", failed, "AGE"},
+		{"no success, matching group", "deployments.apps", failed, "READY"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := schemaForResults(tc.kind, tc.results)
+			if s.Headers[1] != tc.wantFirst {
+				t.Errorf("headers=%v want second column %s", s.Headers, tc.wantFirst)
 			}
 		})
 	}

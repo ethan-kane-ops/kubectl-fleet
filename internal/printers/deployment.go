@@ -11,6 +11,7 @@ import (
 
 func init() {
 	register(Schema{
+		Group:       "apps",
 		Headers:     []string{"NAME", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"},
 		WideHeaders: []string{"CONTAINERS", "IMAGES", "SELECTOR"},
 		Row:         deploymentRow,
