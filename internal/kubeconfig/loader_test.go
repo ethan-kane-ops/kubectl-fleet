@@ -112,9 +112,9 @@ func TestContextsBadRegex(t *testing.T) {
 
 func TestRESTConfigFor(t *testing.T) {
 	path := writeFixture(t)
-	rc, err := RESTConfigFor(flagsWith(path), "stage")
+	rc, err := restConfigFor(t, flagsWith(path), "stage")
 	if err != nil {
-		t.Fatalf("RESTConfigFor: %v", err)
+		t.Fatalf("ToRESTConfig: %v", err)
 	}
 	if rc.Host != "https://stage.example.test:6443" {
 		t.Errorf("host=%q", rc.Host)
@@ -123,7 +123,7 @@ func TestRESTConfigFor(t *testing.T) {
 
 func TestRESTConfigForMissingContext(t *testing.T) {
 	path := writeFixture(t)
-	if _, err := RESTConfigFor(flagsWith(path), "nope"); err == nil {
+	if _, err := restConfigFor(t, flagsWith(path), "nope"); err == nil {
 		t.Fatal("expected error on missing context")
 	}
 }
@@ -145,7 +145,7 @@ func TestNamespace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := flagsWith(path)
 			f.Namespace = &tc.flagNS
-			got, err := Namespace(ForContext(f, tc.ctx))
+			got, err := forContext(t, f, tc.ctx).Namespace()
 			if err != nil {
 				t.Fatalf("Namespace: %v", err)
 			}
@@ -162,9 +162,9 @@ func TestRESTConfigForHonorsGlobalFlags(t *testing.T) {
 	as, token, timeout := "reader", "override-token", "7s"
 	groups := []string{"g1"}
 	f.Impersonate, f.BearerToken, f.Timeout, f.ImpersonateGroup = &as, &token, &timeout, &groups
-	rc, err := RESTConfigFor(f, "stage")
+	rc, err := restConfigFor(t, f, "stage")
 	if err != nil {
-		t.Fatalf("RESTConfigFor: %v", err)
+		t.Fatalf("ToRESTConfig: %v", err)
 	}
 	if rc.Impersonate.UserName != as || len(rc.Impersonate.Groups) != 1 || rc.Impersonate.Groups[0] != "g1" {
 		t.Errorf("impersonate=%+v", rc.Impersonate)
@@ -264,9 +264,9 @@ func TestServerWarningsPrintedOncePerContext(t *testing.T) {
 	for _, ctx := range []string{"prod", "stage"} {
 		// Two clients per context, as typed and discovery clients would be.
 		for range 2 {
-			rc, err := RESTConfigFor(base, ctx)
+			rc, err := restConfigFor(t, base, ctx)
 			if err != nil {
-				t.Fatalf("RESTConfigFor: %v", err)
+				t.Fatalf("ToRESTConfig: %v", err)
 			}
 			rc.WarningHandler.HandleWarningHeader(299, "", "v1beta1 is deprecated")
 			rc.WarningHandler.HandleWarningHeader(199, "", "not a deprecation warning")
@@ -282,11 +282,60 @@ func TestServerWarningsPrintedOncePerContext(t *testing.T) {
 }
 
 func TestForContextRateLimits(t *testing.T) {
-	rc, err := RESTConfigFor(flagsWith(writeFixture(t)), "prod")
+	rc, err := restConfigFor(t, flagsWith(writeFixture(t)), "prod")
 	if err != nil {
-		t.Fatalf("RESTConfigFor: %v", err)
+		t.Fatalf("ToRESTConfig: %v", err)
 	}
 	if rc.QPS != requestQPS || rc.Burst != requestBurst {
 		t.Errorf("qps=%v burst=%d want %v/%d", rc.QPS, rc.Burst, requestQPS, requestBurst)
+	}
+}
+
+func forContext(t *testing.T, f *genericclioptions.ConfigFlags, ctx string) *Context {
+	t.Helper()
+	cfg, err := Load(f)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return ForContext(f, cfg, ctx)
+}
+
+func restConfigFor(t *testing.T, f *genericclioptions.ConfigFlags, ctx string) (*rest.Config, error) {
+	t.Helper()
+	return forContext(t, f, ctx).ToRESTConfig()
+}
+
+// TestForContextParsesKubeconfigOnce pins the scaling property: building and
+// using many contexts never re-reads the kubeconfig file.
+func TestForContextParsesKubeconfigOnce(t *testing.T) {
+	path := writeFixture(t)
+	f := flagsWith(path)
+	cfg, err := Load(f)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	for _, ctx := range []string{"prod", "stage", "dev"} {
+		kc := ForContext(f, cfg, ctx)
+		if _, err := kc.ToRESTConfig(); err != nil {
+			t.Errorf("%s: ToRESTConfig after the file is gone: %v", ctx, err)
+		}
+		if _, err := kc.Namespace(); err != nil {
+			t.Errorf("%s: Namespace after the file is gone: %v", ctx, err)
+		}
+	}
+}
+
+func TestDiscoveryCacheDirMatchesKubectl(t *testing.T) {
+	cases := map[string]string{
+		"https://prod.example.test:6443":   "/c/prod.example.test_6443",
+		"http://127.0.0.1:8080/some/path?": "/c/127.0.0.1_8080/some/path_",
+	}
+	for host, want := range cases {
+		if got := discoveryCacheDir("/c", host); got != want {
+			t.Errorf("discoveryCacheDir(%q)=%q want %q", host, got, want)
+		}
 	}
 }

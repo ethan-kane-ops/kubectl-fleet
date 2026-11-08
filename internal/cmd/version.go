@@ -56,7 +56,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 
 			results := fleet.Run(cmd.Context(), refs, parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (*version.Info, error) {
-					return probeServerVersion(kubeFlags, r)
+					return probeServerVersion(kubeconfig.ForContext(kubeFlags, cfg, r.Name))
 				})
 
 			for _, res := range results {
@@ -99,8 +99,8 @@ func clientRow() ([]string, []string) {
 		[]string{buildinfo.Commit, buildinfo.Date, "", ""}
 }
 
-func probeServerVersion(kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef) (*version.Info, error) {
-	disco, err := kubeconfig.ForContext(kubeFlags, r.Name).ToDiscoveryClient()
+func probeServerVersion(kc *kubeconfig.Context) (*version.Info, error) {
+	disco, err := kc.ToDiscoveryClient()
 	if err != nil {
 		return nil, fmt.Errorf("discovery client: %w", err)
 	}

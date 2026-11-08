@@ -47,7 +47,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			opts := health.Options{Since: since}
 			results := fleet.Run(cmd.Context(), refs, parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (health.Summary, error) {
-					return statusOne(ctx, kubeFlags, r, opts)
+					return statusOne(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), opts)
 				})
 
 			headers := []string{"CONTEXT", "VERSION", "NODES", "PODS", "PENDING", "CRASHLOOP"}
@@ -122,8 +122,8 @@ type statusRecord struct {
 	Error string `json:"error,omitempty"`
 }
 
-func statusOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, opts health.Options) (health.Summary, error) {
-	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
+func statusOne(ctx context.Context, kc *kubeconfig.Context, opts health.Options) (health.Summary, error) {
+	clients, err := k8s.New(kc)
 	if err != nil {
 		return health.Summary{}, err
 	}
