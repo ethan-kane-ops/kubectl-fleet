@@ -96,7 +96,7 @@ release-snapshot:
 
 # Cut a release: tag and push. release.yml workflow runs goreleaser.
 release version:
-    git tag v{{version}}
+    git tag -a v{{version}} -m "v{{version}}"
     git push origin v{{version}}
 
 demo_clusters := "fleet-demo-a fleet-demo-b fleet-demo-c"
