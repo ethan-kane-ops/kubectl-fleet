@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/rest"
 )
 
 const sampleKubeconfig = `apiVersion: v1
@@ -244,5 +245,35 @@ func TestSelect(t *testing.T) {
 				t.Errorf("got %v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestServerWarningsPrintedOncePerContext(t *testing.T) {
+	path := writeFixture(t)
+	var buf strings.Builder
+	orig := serverWarnings
+	serverWarnings = &warningPrinter{out: &buf, seen: map[string]bool{}}
+	t.Cleanup(func() { serverWarnings = orig })
+
+	wrapped := 0
+	base := flagsWith(path)
+	base.WrapConfigFn = func(c *rest.Config) *rest.Config { wrapped++; return c }
+	for _, ctx := range []string{"prod", "stage"} {
+		// Two clients per context, as typed and discovery clients would be.
+		for range 2 {
+			rc, err := RESTConfigFor(base, ctx)
+			if err != nil {
+				t.Fatalf("RESTConfigFor: %v", err)
+			}
+			rc.WarningHandler.HandleWarningHeader(299, "", "v1beta1 is deprecated")
+			rc.WarningHandler.HandleWarningHeader(199, "", "not a deprecation warning")
+		}
+	}
+	want := "warn: prod: v1beta1 is deprecated\nwarn: stage: v1beta1 is deprecated\n"
+	if buf.String() != want {
+		t.Errorf("got %q want %q", buf.String(), want)
+	}
+	if wrapped != 4 {
+		t.Errorf("user WrapConfigFn ran %d times, want 4", wrapped)
 	}
 }
