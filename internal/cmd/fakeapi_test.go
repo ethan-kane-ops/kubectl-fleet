@@ -28,6 +28,10 @@ type fakeCluster struct {
 	// extraColumn adds a column with that name, cell value "x", before Age.
 	noTables    bool
 	extraColumn string
+	// gitVersion is what /version reports (default v1.31.0); nodes is the
+	// node count, served as Ready nodes named node-0..node-N-1.
+	gitVersion string
+	nodes      int
 
 	mu       sync.Mutex
 	requests []string
@@ -70,7 +74,11 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	switch {
 	case p == "/version":
-		writeJSON(w, map[string]string{"gitVersion": "v1.31.0"})
+		v := f.gitVersion
+		if v == "" {
+			v = "v1.31.0"
+		}
+		writeJSON(w, map[string]string{"gitVersion": v})
 	case p == "/api":
 		writeJSON(w, map[string]any{"kind": "APIVersions", "versions": []string{"v1"}})
 	case p == "/apis":
@@ -96,7 +104,7 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	case p == "/api/v1/nodes":
-		writeJSON(w, map[string]any{"kind": "NodeList", "apiVersion": "v1", "metadata": map[string]any{}, "items": []any{}})
+		f.listNodes(w, r)
 	case p == "/api/v1/pods":
 		f.listPods(w, r, "")
 	case strings.HasPrefix(p, "/api/v1/namespaces/"):
@@ -140,6 +148,27 @@ func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string
 		items = append(items, podJSON(p))
 	}
 	writeJSON(w, map[string]any{"kind": "PodList", "apiVersion": "v1", "metadata": meta, "items": items})
+}
+
+// listNodes serves nodes as a full NodeList, or as a metadata-only
+// PartialObjectMetadataList when the client asks for one.
+func (f *fakeCluster) listNodes(w http.ResponseWriter, r *http.Request) {
+	metaOnly := strings.Contains(r.Header.Get("Accept"), "as=PartialObjectMetadataList")
+	items := make([]any, 0, f.nodes)
+	for i := range f.nodes {
+		meta := map[string]any{"name": fmt.Sprintf("node-%d", i)}
+		if metaOnly {
+			items = append(items, map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": meta})
+			continue
+		}
+		items = append(items, map[string]any{"kind": "Node", "apiVersion": "v1", "metadata": meta,
+			"status": map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": "True"}}}})
+	}
+	if metaOnly {
+		writeJSON(w, map[string]any{"kind": "PartialObjectMetadataList", "apiVersion": "meta.k8s.io/v1", "metadata": map[string]any{}, "items": items})
+		return
+	}
+	writeJSON(w, map[string]any{"kind": "NodeList", "apiVersion": "v1", "metadata": map[string]any{}, "items": items})
 }
 
 func (f *fakeCluster) wantsTable(r *http.Request) bool {

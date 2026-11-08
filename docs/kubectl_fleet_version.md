@@ -9,14 +9,15 @@ kubectl fleet version [flags]
 ### Options
 
 ```
-      --client            show client version only, skip cluster probes
-      --contexts string   regex selecting kubeconfig contexts by name (default: all)
-      --exclude string    regex of context names to leave out, applied after --contexts
-  -h, --help              help for version
-      --no-headers        suppress header row in table/wide output
-  -o, --output string     output format: table|wide|json|yaml|name (default "table")
-      --parallelism int   max contexts queried at once (0=unbounded) (default 32)
-      --strict            exit non-zero if any context failed (ignored with --client)
+      --client              show client version only, skip cluster probes
+      --contexts string     regex selecting kubeconfig contexts by name (default: all)
+      --exclude string      regex of context names to leave out, applied after --contexts
+  -h, --help                help for version
+      --no-headers          suppress header row in table/wide output
+  -o, --output string       output format: table|wide|json|yaml|name (default "table")
+      --parallelism int     max contexts queried at once (0=unbounded) (default 32)
+      --strict              exit non-zero if any context failed (ignored with --client)
+      --where stringArray   filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
 ```
 
 ### Options inherited from parent commands

@@ -77,13 +77,11 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			refs, err := o.selectContexts(kubeFlags, cfg)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
 			if err != nil {
 				return err
 			}
-			if len(refs) == 0 {
-				return fmt.Errorf("no matching contexts")
-			}
+			refs := sel.refs
 
 			req := getRequest{kind: kind, name: name, selector: labelSelector, allNamespaces: allNamespaces, serverPrint: serverPrint, format: f}
 			fetch := func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
@@ -157,8 +155,10 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			sel.report(cmd.ErrOrStderr())
+			failed += len(sel.failures)
 			if o.strict && failed > 0 {
-				return fmt.Errorf("%d of %d contexts failed", failed, len(refs))
+				return fmt.Errorf("%d of %d contexts failed", failed, len(refs)+len(sel.failures))
 			}
 			return nil
 		},

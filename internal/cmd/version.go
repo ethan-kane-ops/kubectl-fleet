@@ -42,13 +42,11 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			refs, err := o.selectContexts(kubeFlags, cfg)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
 			if err != nil {
 				return err
 			}
-			if len(refs) == 0 {
-				return fmt.Errorf("no matching contexts")
-			}
+			refs := sel.refs
 
 			results := fleet.Run(cmd.Context(), refs, o.parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (*version.Info, error) {
@@ -73,9 +71,10 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
 				return err
 			}
+			sel.report(cmd.ErrOrStderr())
 			if o.strict {
-				if n := fleet.CountErrors(results); n > 0 {
-					return fmt.Errorf("%d of %d contexts failed", n, len(results))
+				if n := fleet.CountErrors(results) + len(sel.failures); n > 0 {
+					return fmt.Errorf("%d of %d contexts failed", n, len(results)+len(sel.failures))
 				}
 			}
 			return nil
