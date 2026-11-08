@@ -214,7 +214,8 @@ func appendErrorRow(tbl *output.Table, ctx string, namespaced bool, s printers.S
 // namespace is resolved per context: --namespace, else that context's own
 // namespace, else "default".
 func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, kind, name string, allNS bool, selector string) (fetchedResource, error) {
-	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
+	cf := kubeconfig.ForContext(kubeFlags, r.Name)
+	clients, err := k8s.New(cf)
 	if err != nil {
 		return fetchedResource{}, err
 	}
@@ -225,7 +226,7 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource, group: gvr.Group}
 	ns := ""
 	if namespaced && !allNS {
-		if ns, err = kubeconfig.NamespaceFor(kubeFlags, r.Name); err != nil {
+		if ns, err = kubeconfig.Namespace(cf); err != nil {
 			return out, err
 		}
 	}
