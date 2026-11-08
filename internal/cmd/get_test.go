@@ -116,3 +116,42 @@ func TestGetNameOutputOmitsFailedContexts(t *testing.T) {
 		t.Errorf("stderr should warn about the failed context: %q", stderr.String())
 	}
 }
+
+func TestGetNamedObjectAcrossFleet(t *testing.T) {
+	has := &fakeCluster{pods: []fakePod{{"default", "web"}}}
+	lacks := &fakeCluster{}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "has", server: has.start(t)},
+		fakeContext{name: "lacks", server: lacks.start(t)},
+	)
+	cases := []struct {
+		name    string
+		args    []string
+		wantOut string
+		wantErr string
+	}{
+		{"absent on some contexts is not a failure", []string{"pods", "web", "--strict", "-o", "name"}, "has/default/web\n", ""},
+		{"absent everywhere is an error", []string{"pods", "nope"}, "", `pods "nope" not found in any reachable context`},
+		{"name with selector is rejected", []string{"pods", "web", "-l", "app=web"}, "", "cannot be combined with --selector"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newGetCmd(newFlags(path))
+			c.SilenceUsage = true
+			var stdout bytes.Buffer
+			c.SetOut(&stdout)
+			c.SetErr(&bytes.Buffer{})
+			c.SetArgs(tc.args)
+			err := c.Execute()
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("Execute: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("want error %q, got %v", tc.wantErr, err)
+			}
+			if stdout.String() != tc.wantOut {
+				t.Errorf("stdout=%q want %q", stdout.String(), tc.wantOut)
+			}
+		})
+	}
+}

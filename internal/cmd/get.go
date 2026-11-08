@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -42,6 +43,9 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if len(args) == 2 {
 				name = args[1]
 			}
+			if name != "" && labelSelector != "" {
+				return fmt.Errorf("a resource name cannot be combined with --selector")
+			}
 			f, err := output.ParseFormat(outputFlag)
 			if err != nil {
 				return err
@@ -66,6 +70,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			schema, namespaced := schemaForResults(kind, results)
 			tbl := buildTable(schema, namespaced)
 			tbl.NoHeaders = noHeaders
+			found := 0
 			for _, res := range results {
 				if res.Err != nil {
 					// -o name feeds scripts; a "<error>" placeholder there would
@@ -76,6 +81,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
 					continue
 				}
+				found += len(res.Value.items)
 				for i := range res.Value.items {
 					u := &res.Value.items[i]
 					cols, wide := schema.Row(u)
@@ -85,6 +91,9 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					}
 					tbl.Append(append(prefix, cols...), append(wide, ""))
 				}
+			}
+			if name != "" && found == 0 {
+				return fmt.Errorf("%s %q not found in any reachable context", kind, name)
 			}
 			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
 				return err
@@ -193,6 +202,10 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 
 	if name != "" {
 		u, err := clients.Dynamic.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+		// Absent from some clusters is normal for a fleet, not a failure.
+		if apierrors.IsNotFound(err) {
+			return out, nil
+		}
 		if err != nil {
 			return out, fmt.Errorf("get %s/%s: %w", gvr.Resource, name, err)
 		}
