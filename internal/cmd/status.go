@@ -64,6 +64,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 						row = append(row, "?")
 					}
 					tbl.Append(row, []string{"?", "?", "", res.Err.Error()})
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
 					continue
 				}
 				s := res.Value
