@@ -430,3 +430,38 @@ func TestPodStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectorsAreStableAndComplete(t *testing.T) {
+	type m = map[string]interface{}
+	labels := m{"tier": "web", "app": "api", "env": "prod", "zone": "a"}
+	cases := []struct {
+		name string
+		fn   func() string
+		want string
+	}{
+		{"service selector sorted", func() string {
+			return serviceSelector(m{"spec": m{"selector": labels}})
+		}, "app=api,env=prod,tier=web,zone=a"},
+		{"deployment matchLabels sorted", func() string {
+			return deploymentSelector(m{"spec": m{"selector": m{"matchLabels": labels}}})
+		}, "app=api,env=prod,tier=web,zone=a"},
+		{"deployment matchExpressions included", func() string {
+			return deploymentSelector(m{"spec": m{"selector": m{
+				"matchLabels": m{"app": "api"},
+				"matchExpressions": []interface{}{
+					m{"key": "env", "operator": "In", "values": []interface{}{"prod", "stage"}},
+				},
+			}}})
+		}, "app=api,env in (prod,stage)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Map iteration order varies per call; repeat to catch instability.
+			for range 20 {
+				if got := tc.fn(); got != tc.want {
+					t.Fatalf("got %q want %q", got, tc.want)
+				}
+			}
+		})
+	}
+}

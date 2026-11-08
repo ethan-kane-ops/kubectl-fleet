@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func init() {
@@ -56,14 +58,20 @@ func podTemplateContainers(obj map[string]interface{}) (names, images string) {
 	return strings.Join(ns, ","), strings.Join(is, ",")
 }
 
+// deploymentSelector renders spec.selector as kubectl does: matchLabels and
+// matchExpressions, sorted, so rows are stable across runs.
 func deploymentSelector(obj map[string]interface{}) string {
-	m, found, err := unstructured.NestedMap(obj, "spec", "selector", "matchLabels")
+	m, found, err := unstructured.NestedMap(obj, "spec", "selector")
 	if err != nil || !found {
 		return ""
 	}
-	parts := make([]string, 0, len(m))
-	for k, v := range m {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	var ls metav1.LabelSelector
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, &ls); err != nil {
+		return ""
 	}
-	return strings.Join(parts, ",")
+	sel, err := metav1.LabelSelectorAsSelector(&ls)
+	if err != nil {
+		return ""
+	}
+	return sel.String()
 }
