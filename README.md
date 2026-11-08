@@ -145,7 +145,8 @@ Failed clusters never abort the run. Per-context errors land in the table with
 `<error>` in the `NAME` column (left out of `-o name|json|yaml`) and surface a `warn:`
 line on stderr. Without `-n` or `-A`, each context is queried in its own
 namespace, falling back to `default`. `get <kind> <name>` skips contexts that
-don't have the object and errors only when none of them do.
+don't have the object and errors only when none of them do. With `-A`, it
+finds the name in every namespace of every context.
 
 ### `kubectl fleet status`
 

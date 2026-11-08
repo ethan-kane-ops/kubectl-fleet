@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/tools/pager"
@@ -236,7 +237,13 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 		}
 	}
 
-	if name != "" {
+	// A namespaced name with -A has no single object URL, so it becomes a
+	// list across all namespaces filtered by name: it finds every namespace,
+	// on every cluster, that holds an object of that name.
+	listOpts := metav1.ListOptions{LabelSelector: selector}
+	if name != "" && namespaced && allNS {
+		listOpts.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+	} else if name != "" {
 		u, err := clients.Dynamic.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 		// Absent from some clusters is normal for a fleet, not a failure.
 		if apierrors.IsNotFound(err) {
@@ -253,7 +260,7 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 	lister := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 		return clients.Dynamic.Resource(gvr).Namespace(ns).List(ctx, opts)
 	})
-	err = lister.EachListItem(ctx, metav1.ListOptions{LabelSelector: selector}, func(obj runtime.Object) error {
+	err = lister.EachListItem(ctx, listOpts, func(obj runtime.Object) error {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok {
 			return fmt.Errorf("unexpected list item %T", obj)
