@@ -9,8 +9,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/pager"
 )
 
 // Options tunes Summarize.
@@ -66,18 +68,22 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 		}
 	}
 
-	pods, err := cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return s, fmt.Errorf("list pods: %w", err)
-	}
-	s.PodsTotal = len(pods.Items)
 	noisy := map[string]int{}
 	var cutoff time.Time
 	if opts.Since > 0 {
 		cutoff = time.Now().Add(-opts.Since)
 	}
-	for i := range pods.Items {
-		p := &pods.Items[i]
+	// Pods are paged (500 per request) and folded into the counters one at a
+	// time, so a large cluster is never held in memory as one list.
+	lister := pager.New(func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+		return cs.CoreV1().Pods("").List(ctx, o)
+	})
+	err = lister.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		p, ok := obj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("unexpected list item %T", obj)
+		}
+		s.PodsTotal++
 		// A pod counts once towards its namespace's noise. Succeeded pods
 		// (finished Jobs) are healthy and never count.
 		noisyPod := false
@@ -104,6 +110,10 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 		if !cutoff.IsZero() {
 			s.PodsRestartedInWindow += countRestartsInWindow(p, cutoff)
 		}
+		return nil
+	})
+	if err != nil {
+		return s, fmt.Errorf("list pods: %w", err)
 	}
 	s.TopNoisyNS = topNoisy(noisy, 3)
 	return s, nil

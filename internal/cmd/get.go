@@ -8,7 +8,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/tools/pager"
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/fleet"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
@@ -212,10 +214,21 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 		out.items = []unstructured.Unstructured{*u}
 		return out, nil
 	}
-	list, err := clients.Dynamic.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	// Page through the list as kubectl does (500 per request) so large
+	// clusters are not asked to serialise every object in one response.
+	lister := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		return clients.Dynamic.Resource(gvr).Namespace(ns).List(ctx, opts)
+	})
+	err = lister.EachListItem(ctx, metav1.ListOptions{LabelSelector: selector}, func(obj runtime.Object) error {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return fmt.Errorf("unexpected list item %T", obj)
+		}
+		out.items = append(out.items, *u)
+		return nil
+	})
 	if err != nil {
 		return out, fmt.Errorf("list %s: %w", gvr.Resource, err)
 	}
-	out.items = list.Items
 	return out, nil
 }
