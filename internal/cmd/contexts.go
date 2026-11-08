@@ -48,10 +48,8 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 
 			var probes []fleet.ClusterResult[reach]
 			if probe {
-				ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
-				defer cancel()
-				probes = fleet.Run(ctx, refs, parallelism, func(ctx context.Context, r kubeconfig.ContextRef) (reach, error) {
-					return probeOne(ctx, kubeFlags, r)
+				probes = fleet.Run(cmd.Context(), refs, parallelism, func(_ context.Context, r kubeconfig.ContextRef) (reach, error) {
+					return probeOne(kubeFlags, r, timeout)
 				})
 			}
 			for i, r := range refs {
@@ -96,14 +94,14 @@ type reach struct {
 	latency time.Duration
 }
 
-func probeOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef) (reach, error) {
+// probeOne times a /version call against one context. The timeout is applied
+// per request, so contexts queued behind --parallelism get the full budget.
+func probeOne(kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, timeout time.Duration) (reach, error) {
 	restCfg, err := kubeconfig.RESTConfigFor(kubeFlags, r.Name)
 	if err != nil {
 		return reach{}, err
 	}
-	if deadline, ok := ctx.Deadline(); ok {
-		restCfg.Timeout = time.Until(deadline)
-	}
+	restCfg.Timeout = timeout
 	disco, err := discovery.NewDiscoveryClientForConfig(restCfg)
 	if err != nil {
 		return reach{}, fmt.Errorf("discovery client: %w", err)
