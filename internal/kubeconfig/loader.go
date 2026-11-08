@@ -168,6 +168,18 @@ func ValidateFleetFlags(kubeFlags *genericclioptions.ConfigFlags) error {
 			return fmt.Errorf("%s is not supported by kubectl fleet: %s", s.flag, s.hint)
 		}
 	}
+	// A bearer token or password is a secret for one cluster. Sent across the
+	// fleet it would reach every API server, so it needs --context.
+	if kubeFlags.Context == nil || *kubeFlags.Context == "" {
+		for _, s := range []struct {
+			flag string
+			val  *string
+		}{{"--token", kubeFlags.BearerToken}, {"--username", kubeFlags.Username}, {"--password", kubeFlags.Password}} {
+			if s.val != nil && *s.val != "" {
+				return fmt.Errorf("%s requires --context: it would send the credential to every cluster in the fleet", s.flag)
+			}
+		}
+	}
 	return nil
 }
 
