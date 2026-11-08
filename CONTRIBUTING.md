@@ -147,7 +147,10 @@ Versioning follows SemVer:
 - `v0.x.y`: pre-1.0, breaking changes allowed in minor bumps
 - Patch bumps for fixes and non-breaking polish between phases
 - Minor bumps for new phases (Argo support, drift detection, etc.)
-- `v1.0.0` will mark feature-complete and trigger krew submission
+- `v1.0.0` will mark feature-complete
+
+Releases ship as GitHub Release archives and through `go install`; there is
+no krew distribution.
 
 ## Reporting issues
 

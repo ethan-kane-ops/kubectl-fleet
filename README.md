@@ -57,10 +57,8 @@ just install      # go install → on PATH
 kubectl fleet --help
 ```
 
-> **krew distribution:** deferred until the plugin is feature-complete. Once
-> stable, a manifest will be submitted to
-> [`kubernetes-sigs/krew-index`](https://github.com/kubernetes-sigs/krew-index)
-> so `kubectl krew install fleet` becomes the recommended path.
+> kubectl-fleet is not distributed through krew. Install it from a GitHub
+> Release, with `go install`, or from source as above.
 
 ### Shell completion
 
