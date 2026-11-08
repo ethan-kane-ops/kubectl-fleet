@@ -8,11 +8,13 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // Clients bundles the three flavours of client kubectl-fleet uses.
@@ -30,7 +32,13 @@ func New(getter genericclioptions.RESTClientGetter) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rest config: %w", err)
 	}
-	typed, err := kubernetes.NewForConfig(restCfg)
+	// Built-in types support protobuf, which is several times smaller and
+	// cheaper to decode than JSON for large Pod and Node lists. JSON stays
+	// acceptable for servers or proxies that cannot serve protobuf.
+	typedCfg := rest.CopyConfig(restCfg)
+	typedCfg.ContentType = runtime.ContentTypeProtobuf
+	typedCfg.AcceptContentTypes = runtime.ContentTypeProtobuf + "," + runtime.ContentTypeJSON
+	typed, err := kubernetes.NewForConfig(typedCfg)
 	if err != nil {
 		return nil, fmt.Errorf("typed client: %w", err)
 	}

@@ -110,3 +110,21 @@ func TestShortDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusRequestsProtobufAndPagesNodes(t *testing.T) {
+	cl := &fakeCluster{pods: []fakePod{{"default", "a"}}}
+	c := newStatusCmd(newFlags(writeFakeKubeconfig(t, fakeContext{name: "c", server: cl.start(t)})))
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, path := range []string{"/api/v1/pods", "/api/v1/nodes"} {
+		if got := cl.acceptFor(path); !strings.HasPrefix(got, "application/vnd.kubernetes.protobuf") {
+			t.Errorf("%s Accept=%q want protobuf first", path, got)
+		}
+	}
+	if !requested(cl, "/api/v1/nodes") || !strings.Contains(strings.Join(cl.paths(), " "), "/api/v1/nodes?limit=500") {
+		t.Errorf("node list not paged: %v", cl.paths())
+	}
+}
