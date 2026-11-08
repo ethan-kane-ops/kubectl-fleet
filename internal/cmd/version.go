@@ -101,11 +101,7 @@ func clientRow() ([]string, []string) {
 }
 
 func probeServerVersion(kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef) (*version.Info, error) {
-	restCfg, err := kubeconfig.RESTConfigFor(kubeFlags, r.Name)
-	if err != nil {
-		return nil, err
-	}
-	clients, err := k8s.New(restCfg)
+	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
 	if err != nil {
 		return nil, err
 	}

@@ -106,11 +106,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 }
 
 func statusOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, opts health.Options) (health.Summary, error) {
-	restCfg, err := kubeconfig.RESTConfigFor(kubeFlags, r.Name)
-	if err != nil {
-		return health.Summary{}, err
-	}
-	clients, err := k8s.New(restCfg)
+	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
 	if err != nil {
 		return health.Summary{}, err
 	}

@@ -3,15 +3,16 @@
 package k8s
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 // Clients bundles the three flavours of client kubectl-fleet uses.
@@ -21,8 +22,14 @@ type Clients struct {
 	Discovery discovery.DiscoveryInterface
 }
 
-// New builds a Clients from a REST config.
-func New(restCfg *rest.Config) (*Clients, error) {
+// New builds a Clients from a REST client getter, typically the per-context
+// ConfigFlags from kubeconfig.ForContext. Discovery goes through the getter's
+// disk-cached client, the same cache and rate limits kubectl uses.
+func New(getter genericclioptions.RESTClientGetter) (*Clients, error) {
+	restCfg, err := getter.ToRESTConfig()
+	if err != nil {
+		return nil, fmt.Errorf("rest config: %w", err)
+	}
 	typed, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
 		return nil, fmt.Errorf("typed client: %w", err)
@@ -31,7 +38,7 @@ func New(restCfg *rest.Config) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dynamic client: %w", err)
 	}
-	disco, err := discovery.NewDiscoveryClientForConfig(restCfg)
+	disco, err := getter.ToDiscoveryClient()
 	if err != nil {
 		return nil, fmt.Errorf("discovery client: %w", err)
 	}
@@ -43,7 +50,24 @@ func New(restCfg *rest.Config) (*Clients, error) {
 //
 // Accepts: resource plural ("pods"), singular ("pod"), short ("po"), kind
 // ("Pod"), or group-qualified plural ("deployments.apps").
+//
+// When disco is a stale cache and the kind is missing, the cache is
+// invalidated and the lookup retried once, so a newly installed CRD resolves
+// without waiting for the cache to expire.
 func ResolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.GroupVersionResource, namespaced bool, err error) {
+	gvr, namespaced, err = resolveGVR(disco, kind)
+	if errors.Is(err, errKindNotFound) {
+		if cached, ok := disco.(discovery.CachedDiscoveryInterface); ok && !cached.Fresh() {
+			cached.Invalidate()
+			return resolveGVR(disco, kind)
+		}
+	}
+	return gvr, namespaced, err
+}
+
+var errKindNotFound = errors.New("not found in cluster")
+
+func resolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.GroupVersionResource, namespaced bool, err error) {
 	gr := schema.ParseGroupResource(kind)
 	target := strings.ToLower(gr.Resource)
 	wantGroup := gr.Group
@@ -76,7 +100,7 @@ func ResolveGVR(disco discovery.DiscoveryInterface, kind string) (gvr schema.Gro
 		}
 	}
 	if best == nil {
-		return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q not found in cluster", kind)
+		return schema.GroupVersionResource{}, false, fmt.Errorf("kind %q %w", kind, errKindNotFound)
 	}
 	return best.gvr, best.namespaced, nil
 }

@@ -34,11 +34,11 @@ func fakeDisco() discovery.DiscoveryInterface {
 func TestResolveGVR(t *testing.T) {
 	disco := fakeDisco()
 	cases := []struct {
-		in       string
-		wantRes  string
-		wantGrp  string
-		wantNsd  bool
-		wantOK   bool
+		in      string
+		wantRes string
+		wantGrp string
+		wantNsd bool
+		wantOK  bool
 	}{
 		{"pods", "pods", "", true, true},
 		{"pod", "pods", "", true, true},
@@ -70,6 +70,56 @@ func TestResolveGVR(t *testing.T) {
 			}
 			if nsd != c.wantNsd {
 				t.Errorf("namespaced=%v want %v", nsd, c.wantNsd)
+			}
+		})
+	}
+}
+
+// staleCache wraps a discovery client whose first view lacks a resource,
+// standing in for a disk cache written before a CRD was installed.
+type staleCache struct {
+	discovery.DiscoveryInterface
+	fresh       bool
+	invalidated int
+	afterReload []*metav1.APIResourceList
+}
+
+func (s *staleCache) Fresh() bool { return s.fresh }
+
+func (s *staleCache) Invalidate() {
+	s.invalidated++
+	s.fresh = true
+	s.DiscoveryInterface.(*fakediscovery.FakeDiscovery).Resources = s.afterReload
+}
+
+func TestResolveGVRInvalidatesStaleCache(t *testing.T) {
+	widgets := &metav1.APIResourceList{
+		GroupVersion: "example.io/v1",
+		APIResources: []metav1.APIResource{{Name: "widgets", SingularName: "widget", Namespaced: true, Kind: "Widget"}},
+	}
+	cases := []struct {
+		name            string
+		fresh           bool
+		wantErr         bool
+		wantInvalidated int
+	}{
+		{"stale cache is invalidated and retried", false, false, 1},
+		{"fresh cache is trusted", true, true, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fd := fakeDisco()
+			reload := append(append([]*metav1.APIResourceList{}, fd.(*fakediscovery.FakeDiscovery).Resources...), widgets)
+			c := &staleCache{DiscoveryInterface: fd, fresh: tc.fresh, afterReload: reload}
+			gvr, _, err := ResolveGVR(c, "widgets")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err=%v wantErr=%v", err, tc.wantErr)
+			}
+			if !tc.wantErr && gvr.Group != "example.io" {
+				t.Errorf("gvr=%v", gvr)
+			}
+			if c.invalidated != tc.wantInvalidated {
+				t.Errorf("invalidated=%d want %d", c.invalidated, tc.wantInvalidated)
 			}
 		})
 	}

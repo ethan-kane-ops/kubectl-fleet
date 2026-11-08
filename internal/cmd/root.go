@@ -4,6 +4,8 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 )
 
 // NewRootCmd returns the root cobra command for kubectl-fleet.
@@ -23,6 +25,9 @@ func NewRootCmd() *cobra.Command {
 		Short:         "Multi-cluster operational awareness for K8s fleets",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(*cobra.Command, []string) error {
+			return kubeconfig.ValidateFleetFlags(kubeFlags)
+		},
 		// Help/usage text should still read "kubectl fleet ..." since
 		// that's the actual invocation via the kubectl plugin protocol.
 		Annotations: map[string]string{

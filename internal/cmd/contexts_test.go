@@ -38,9 +38,13 @@ func tmpKubeconfig(t *testing.T) string {
 	return path
 }
 
+// newFlags returns ConfigFlags for the kubeconfig at path, with the discovery
+// cache next to it so tests never touch ~/.kube/cache.
 func newFlags(path string) *genericclioptions.ConfigFlags {
 	f := genericclioptions.NewConfigFlags(true)
+	cache := filepath.Join(filepath.Dir(path), "cache")
 	f.KubeConfig = &path
+	f.CacheDir = &cache
 	return f
 }
 
