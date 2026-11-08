@@ -213,8 +213,9 @@ per context as `warn: <context>: <message>`.
 
 `KUBECONFIG` env var is honoured (colon-separated multi-file lists are merged).
 
-Contexts run in parallel (`--parallelism`, default 8). If your credential
-plugins prompt interactively (MFA codes, browser SSO), run with
+Contexts run in parallel: `--parallelism` defaults to 32, or 16 for `get`,
+which holds a page of decoded objects per in-flight context. If your
+credential plugins prompt interactively (MFA codes, browser SSO), run with
 `--parallelism 1` so the prompts don't interleave.
 
 ## Requirements

@@ -142,7 +142,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel cluster calls (0=unbounded)")
+	c.Flags().IntVar(&parallelism, "parallelism", defaultGetParallelism, "max parallel cluster calls (0=unbounded); each in-flight context holds a page of up to 500 decoded objects")
 	c.Flags().StringVarP(&labelSelector, "selector", "l", "", "label selector")
 	c.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "query across all namespaces")
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")

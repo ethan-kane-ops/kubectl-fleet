@@ -91,7 +91,7 @@ accept `*genericclioptions.ConfigFlags` so kubectl global flags (`--context`,
   failing must not abort processing for the others. Use `internal/fleet.Run`
   and surface per-cluster errors in the result table.
 - **Multi-cluster reads are parallel by default.** Bound via `--parallelism N`
-  (default 8). Never block on a single slow cluster.
+  (default 32, 16 for `get`). Never block on a single slow cluster.
 - **Tests**: table-driven; `t.TempDir()` for filesystem fixtures; fake clients
   from `k8s.io/client-go/kubernetes/fake` and `dynamic/fake`. Race detector
   must stay clean (`go test -race ./...`).
