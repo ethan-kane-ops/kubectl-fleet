@@ -54,8 +54,9 @@ var suites = []struct {
 	{
 		shape: fleetShape{name: "big clusters", clusters: 20, pods: 10000, nodes: 200},
 		scenarios: []scenario{
-			{args: []string{"get", "pods", "-A"}, budgetMB: 600, wantLines: podRows},
-			{args: []string{"get", "pods", "-A", "-o", "name"}, budgetMB: 600, wantLines: podNames},
+			{args: []string{"get", "pods", "-A"}, budgetMB: 400, wantLines: podRows},
+			{args: []string{"get", "pods", "-A", "--server-print=false"}, budgetMB: 600, wantLines: podRows},
+			{args: []string{"get", "pods", "-A", "-o", "name"}, budgetMB: 400, wantLines: podNames},
 			{args: []string{"get", "pods", "-A", "-o", "json"}, budgetMB: 1500},
 			{args: []string{"status"}, budgetMB: 400, wantLines: contextRows},
 		},
@@ -69,7 +70,7 @@ var suites = []struct {
 			{args: []string{"contexts", "--check"}, budgetMB: 100, wantLines: contextRows},
 			{args: []string{"version"}, budgetMB: 100, wantLines: func(f fleetShape) int { return f.clusters + 2 }},
 			{args: []string{"status"}, budgetMB: 300, wantLines: contextRows},
-			{args: []string{"get", "pods", "-A"}, budgetMB: 400, wantLines: podRows},
+			{args: []string{"get", "pods", "-A"}, budgetMB: 250, wantLines: podRows},
 		},
 	},
 }
@@ -91,7 +92,7 @@ func main() {
 	defer func() { _ = os.RemoveAll(work) }()
 
 	failed := false
-	fmt.Printf("%-14s %-30s %8s %9s %8s  %s\n", "FLEET", "COMMAND", "WALL", "PEAK", "BUDGET", "RESULT")
+	fmt.Printf("%-14s %-36s %8s %9s %8s  %s\n", "FLEET", "COMMAND", "WALL", "PEAK", "BUDGET", "RESULT")
 	for _, s := range suites {
 		shape := s.shape
 		shape.pods = max(1, int(float64(shape.pods)**scale))
@@ -137,7 +138,7 @@ func run(bin string, sc scenario, shape fleetShape, kubeconfig, cacheDir string)
 	case sc.wantLines != nil && stdout.lines != sc.wantLines(shape):
 		result = fmt.Sprintf("FAIL: %d lines, want %d", stdout.lines, sc.wantLines(shape))
 	}
-	fmt.Printf("%-14s %-30s %7.2fs %6d MB %5d MB  %s\n", shape.name, strings.Join(sc.args, " "), wall.Seconds(), peakMB, sc.budgetMB, result)
+	fmt.Printf("%-14s %-36s %7.2fs %6d MB %5d MB  %s\n", shape.name, strings.Join(sc.args, " "), wall.Seconds(), peakMB, sc.budgetMB, result)
 	return result
 }
 
@@ -181,7 +182,13 @@ func serveFleet(f fleetShape, latency time.Duration, dir string) (kubeconfig str
 			return "", nil, err
 		}
 	}
-	h := &fakeAPI{pods: pods, nodes: nodes, latency: latency}
+	rows := make([][]byte, f.pods)
+	for i := range rows {
+		if rows[i], err = json.Marshal(podTableRow(i, f.nodes)); err != nil {
+			return "", nil, err
+		}
+	}
+	h := &fakeAPI{pods: pods, podRows: rows, nodes: nodes, latency: latency}
 
 	var cfg, ctxs strings.Builder
 	cfg.WriteString("apiVersion: v1\nkind: Config\nusers:\n- name: u\n  user: {token: t}\n")
@@ -214,11 +221,12 @@ func serveFleet(f fleetShape, latency time.Duration, dir string) (kubeconfig str
 	}, nil
 }
 
-// fakeAPI serves discovery, /version and paged pod and node lists. Every
-// cluster serves the same pre-encoded objects.
+// fakeAPI serves discovery, /version and paged pod and node lists, and pod
+// lists as server-side tables when asked. Every cluster serves the same
+// pre-encoded objects.
 type fakeAPI struct {
-	pods, nodes [][]byte
-	latency     time.Duration
+	pods, podRows, nodes [][]byte
+	latency              time.Duration
 }
 
 func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +246,10 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			{"name": "nodes", "singularName": "node", "namespaced": false, "kind": "Node", "verbs": []string{"get", "list"}},
 		}})
 	case "/api/v1/pods":
+		if strings.Contains(r.Header.Get("Accept"), "as=Table") {
+			page(w, r, "Table", a.podRows)
+			return
+		}
 		page(w, r, "PodList", a.pods)
 	case "/api/v1/nodes":
 		page(w, r, "NodeList", a.nodes)
@@ -246,7 +258,8 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// page writes one page of items, honouring limit and an index continue token.
+// page writes one page of items, honouring limit and an index continue
+// token. A Table carries its column definitions and puts items in rows.
 func page(w http.ResponseWriter, r *http.Request, kind string, items [][]byte) {
 	start, _ := strconv.Atoi(r.URL.Query().Get("continue"))
 	start = min(start, len(items))
@@ -258,7 +271,11 @@ func page(w http.ResponseWriter, r *http.Request, kind string, items [][]byte) {
 	if end < len(items) {
 		cont = strconv.Itoa(end)
 	}
-	_, _ = fmt.Fprintf(w, `{"kind":%q,"apiVersion":"v1","metadata":{"continue":%q},"items":[`, kind, cont)
+	if kind == "Table" {
+		_, _ = fmt.Fprintf(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","metadata":{"continue":%q},"columnDefinitions":%s,"rows":[`, cont, podColumns)
+	} else {
+		_, _ = fmt.Fprintf(w, `{"kind":%q,"apiVersion":"v1","metadata":{"continue":%q},"items":[`, kind, cont)
+	}
 	for i, b := range items[start:end] {
 		if i > 0 {
 			_, _ = w.Write([]byte(","))
@@ -305,6 +322,23 @@ func podObject(i, nodes int) map[string]any {
 				map[string]any{"name": "sidecar", "ready": true, "restartCount": 0, "started": true, "state": running},
 			},
 		},
+	}
+}
+
+// podColumns are the API server's pod table columns.
+const podColumns = `[{"name":"Name","type":"string","priority":0},{"name":"Ready","type":"string","priority":0},` +
+	`{"name":"Status","type":"string","priority":0},{"name":"Restarts","type":"string","priority":0},` +
+	`{"name":"Age","type":"string","priority":0},{"name":"IP","type":"string","priority":1},` +
+	`{"name":"Node","type":"string","priority":1},{"name":"Nominated Node","type":"string","priority":1},` +
+	`{"name":"Readiness Gates","type":"string","priority":1}]`
+
+// podTableRow is podObject as a server table row with includeObject=Metadata.
+// Real metadata also carries managedFields, which this leaves out.
+func podTableRow(i, nodes int) map[string]any {
+	obj := podObject(i, nodes)
+	return map[string]any{
+		"cells":  []any{obj["metadata"].(map[string]any)["name"], "2/2", "Running", "0", "7d", "10.0.0.1", fmt.Sprintf("node-%d", i%max(nodes, 1)), "<none>", "<none>"},
+		"object": map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": obj["metadata"]},
 	}
 }
 

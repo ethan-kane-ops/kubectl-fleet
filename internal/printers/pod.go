@@ -10,7 +10,7 @@ import (
 func init() {
 	register(Schema{
 		Headers:     []string{"NAME", "READY", "STATUS", "RESTARTS", "AGE"},
-		WideHeaders: []string{"IP", "NODE", "NOMINATED_NODE", "READINESS_GATES"},
+		WideHeaders: []string{"IP", "NODE", "NOMINATED NODE", "READINESS GATES"},
 		Row:         podRow,
 		Namespaced:  true,
 	}, "pods", "pod", "po")

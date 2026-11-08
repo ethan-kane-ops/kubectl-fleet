@@ -23,6 +23,11 @@ type fakeCluster struct {
 	pods        []fakePod
 	delay       time.Duration
 	widgetGroup string
+	// Pods are served as a server-side Table when the client asks for one,
+	// unless noTables is set (as for an API that cannot render tables).
+	// extraColumn adds a column with that name, cell value "x", before Age.
+	noTables    bool
+	extraColumn string
 
 	mu       sync.Mutex
 	requests []string
@@ -100,7 +105,7 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 2 && parts[1] == "pods":
 			f.listPods(w, r, parts[0])
 		case len(parts) == 3 && parts[1] == "pods":
-			f.getPod(w, parts[0], parts[2])
+			f.getPod(w, r, parts[0], parts[2])
 		default:
 			http.NotFound(w, r)
 		}
@@ -126,6 +131,10 @@ func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string
 	if end < len(match) {
 		meta["continue"] = strconv.Itoa(end)
 	}
+	if f.wantsTable(r) {
+		writeJSON(w, f.podTable(meta, match[start:end]))
+		return
+	}
 	items := make([]any, 0, end-start)
 	for _, p := range match[start:end] {
 		items = append(items, podJSON(p))
@@ -133,9 +142,39 @@ func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string
 	writeJSON(w, map[string]any{"kind": "PodList", "apiVersion": "v1", "metadata": meta, "items": items})
 }
 
-func (f *fakeCluster) getPod(w http.ResponseWriter, ns, name string) {
+func (f *fakeCluster) wantsTable(r *http.Request) bool {
+	return !f.noTables && strings.Contains(r.Header.Get("Accept"), "as=Table")
+}
+
+// podTable renders pods the way an API server's table convertor does.
+func (f *fakeCluster) podTable(meta map[string]any, pods []fakePod) map[string]any {
+	cols := []map[string]any{{"name": "Name", "priority": 0}, {"name": "Ready", "priority": 0}, {"name": "Status", "priority": 0}, {"name": "Restarts", "priority": 0}}
+	if f.extraColumn != "" {
+		cols = append(cols, map[string]any{"name": f.extraColumn, "priority": 0})
+	}
+	cols = append(cols, map[string]any{"name": "Age", "priority": 0}, map[string]any{"name": "IP", "priority": 1}, map[string]any{"name": "Node", "priority": 1})
+	rows := make([]any, 0, len(pods))
+	for _, p := range pods {
+		cells := []any{p.name, "1/1", "Running", 3}
+		if f.extraColumn != "" {
+			cells = append(cells, "x")
+		}
+		cells = append(cells, "1d", "10.0.0.9", nil)
+		rows = append(rows, map[string]any{
+			"cells":  cells,
+			"object": map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": map[string]any{"name": p.name, "namespace": p.namespace}},
+		})
+	}
+	return map[string]any{"kind": "Table", "apiVersion": "meta.k8s.io/v1", "metadata": meta, "columnDefinitions": cols, "rows": rows}
+}
+
+func (f *fakeCluster) getPod(w http.ResponseWriter, r *http.Request, ns, name string) {
 	for _, p := range f.pods {
 		if p.namespace == ns && p.name == name {
+			if f.wantsTable(r) {
+				writeJSON(w, f.podTable(map[string]any{}, []fakePod{p}))
+				return
+			}
 			writeJSON(w, podJSON(p))
 			return
 		}

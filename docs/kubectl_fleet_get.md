@@ -16,6 +16,7 @@ kubectl fleet get <kind> [name] [flags]
   -o, --output string     output format: table|wide|json|yaml|name (default "table")
       --parallelism int   max parallel cluster calls (0=unbounded); each in-flight context holds a page of up to 500 decoded objects (default 16)
   -l, --selector string   label selector
+      --server-print      let each API server render the table columns, as kubectl does; false uses built-in columns (default true)
       --strict            exit non-zero if any context failed
 ```
 
