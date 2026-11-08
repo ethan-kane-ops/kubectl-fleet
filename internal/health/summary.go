@@ -19,23 +19,23 @@ import (
 type Options struct {
 	// Since enables a count of container restart events whose
 	// LastTerminationState.Terminated.FinishedAt falls within the window.
-	// Zero disables the window count (PodsRestartedInWindow stays 0).
+	// Zero disables the window count (ContainersRestartedInWindow stays 0).
 	Since time.Duration
 }
 
 // Summary is the per-cluster snapshot. The JSON tags are the -o json/yaml
 // contract of `kubectl fleet status`.
 type Summary struct {
-	ServerVersion         string           `json:"serverVersion"`
-	NodesReady            int              `json:"nodesReady"`
-	NodesTotal            int              `json:"nodesTotal"`
-	PodsRunning           int              `json:"podsRunning"`
-	PodsPending           int              `json:"podsPending"`
-	PodsCrashLoop         int              `json:"podsCrashLoop"`
-	PodsFailed            int              `json:"podsFailed"`
-	PodsTotal             int              `json:"podsTotal"`
-	PodsRestartedInWindow int              `json:"podsRestartedInWindow"`
-	TopNoisyNS            []NamespaceNoise `json:"topNoisyNamespaces"`
+	ServerVersion               string           `json:"serverVersion"`
+	NodesReady                  int              `json:"nodesReady"`
+	NodesTotal                  int              `json:"nodesTotal"`
+	PodsRunning                 int              `json:"podsRunning"`
+	PodsPending                 int              `json:"podsPending"`
+	PodsCrashLoop               int              `json:"podsCrashLoop"`
+	PodsFailed                  int              `json:"podsFailed"`
+	PodsTotal                   int              `json:"podsTotal"`
+	ContainersRestartedInWindow int              `json:"containersRestartedInWindow"`
+	TopNoisyNS                  []NamespaceNoise `json:"topNoisyNamespaces"`
 }
 
 // NamespaceNoise reports a single namespace's unhealthy pod count: Pending,
@@ -55,9 +55,14 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 	if disco == nil {
 		disco = cs.Discovery()
 	}
-	if v, err := disco.ServerVersion(); err == nil && v != nil {
-		s.ServerVersion = v.GitVersion
+	// A cluster that cannot answer /version will not answer the lists either;
+	// failing here reports the real error instead of waiting on two more
+	// requests to a dead server.
+	v, err := disco.ServerVersion()
+	if err != nil {
+		return s, fmt.Errorf("server version: %w", err)
 	}
+	s.ServerVersion = v.GitVersion
 
 	nodes, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -110,7 +115,7 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 			noisy[p.Namespace]++
 		}
 		if !cutoff.IsZero() {
-			s.PodsRestartedInWindow += countRestartsInWindow(p, cutoff)
+			s.ContainersRestartedInWindow += countRestartsInWindow(p, cutoff)
 		}
 		return nil
 	})
