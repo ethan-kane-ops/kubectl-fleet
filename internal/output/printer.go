@@ -81,6 +81,23 @@ func Print(w io.Writer, t *Table, f Format) error {
 	return fmt.Errorf("unknown format %q", f)
 }
 
+// Structured reports whether f is json or yaml.
+func (f Format) Structured() bool {
+	return f == FormatJSON || f == FormatYAML
+}
+
+// Encode writes v as JSON or YAML. Commands whose data is richer than a Table
+// (raw objects, typed summaries) use it for -o json|yaml.
+func Encode(w io.Writer, v any, f Format) error {
+	switch f {
+	case FormatJSON:
+		return printJSON(w, v)
+	case FormatYAML:
+		return printYAML(w, v)
+	}
+	return fmt.Errorf("format %q is not json or yaml", f)
+}
+
 func printTable(w io.Writer, t *Table, wide bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	if !t.NoHeaders {

@@ -184,3 +184,30 @@ func TestPrintWide_NoHeaders(t *testing.T) {
 		t.Errorf("wide row missing: %q", out)
 	}
 }
+
+func TestEncode(t *testing.T) {
+	v := []struct {
+		A int `json:"a"`
+	}{{1}}
+	cases := []struct {
+		f       Format
+		want    string
+		wantErr bool
+	}{
+		{FormatJSON, "[\n  {\n    \"a\": 1\n  }\n]\n", false},
+		{FormatYAML, "- a: 1\n", false},
+		{FormatTable, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.f), func(t *testing.T) {
+			var buf bytes.Buffer
+			err := Encode(&buf, v, tc.f)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err=%v wantErr=%v", err, tc.wantErr)
+			}
+			if buf.String() != tc.want {
+				t.Errorf("got %q want %q", buf.String(), tc.want)
+			}
+		})
+	}
+}
