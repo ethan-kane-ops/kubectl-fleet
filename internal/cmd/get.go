@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -25,22 +26,26 @@ import (
 
 // fetchedResource is one context's result, already projected into the
 // output format while paging so no context holds its objects in memory:
-// table rows (NAMESPACE, when namespaced, then the schema's columns) or
-// compact JSON for -o json|yaml.
+// table rows under this context's own columns, or compact JSON for
+// -o json|yaml. Rows start with the namespace when namespaced; wide rows
+// are kept only for -o wide.
 type fetchedResource struct {
-	namespaced bool
-	resource   string
-	group      string
-	count      int
-	rows       [][]string
-	wide       [][]string
-	encoded    [][]byte
+	namespaced  bool
+	resource    string
+	group       string
+	count       int
+	columns     []string
+	wideColumns []string
+	rows        [][]string
+	wide        [][]string
+	encoded     [][]byte
 }
 
 // getRequest is what `get` asks of every context.
 type getRequest struct {
 	kind, name, selector string
 	allNamespaces        bool
+	serverPrint          bool
 	format               output.Format
 }
 
@@ -53,6 +58,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		outputFlag    string
 		noHeaders     bool
 		strict        bool
+		serverPrint   bool
 	)
 	c := &cobra.Command{
 		Use:   "get <kind> [name]",
@@ -83,7 +89,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				return fmt.Errorf("no matching contexts")
 			}
 
-			req := getRequest{kind: kind, name: name, selector: labelSelector, allNamespaces: allNamespaces, format: f}
+			req := getRequest{kind: kind, name: name, selector: labelSelector, allNamespaces: allNamespaces, serverPrint: serverPrint, format: f}
 			fetch := func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
 				return getOne(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), req)
 			}
@@ -168,6 +174,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
+	c.Flags().BoolVar(&serverPrint, "server-print", true, "let each API server render the table columns, as kubectl does; false uses built-in columns")
 	return c
 }
 
@@ -175,30 +182,138 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 // `get -o json|yaml` output.
 const ContextAnnotation = "kubectl-fleet/context"
 
-// buildGetTable lays out the collected per-context rows under the header of
-// the first successful context's schema.
+// buildGetTable lays out the collected per-context rows. Contexts can
+// render different columns for the same kind (another Kubernetes or CRD
+// version), so columns are merged by name, each keeping its place relative
+// to its neighbours, and a context leaves blank the columns it lacks. With no successful context the header
+// falls back to the kind's built-in columns.
 func buildGetTable(kind string, results []fleet.ClusterResult[fetchedResource], f output.Format, noHeaders bool) *output.Table {
-	s, namespaced, _ := schemaForResults(kind, results)
-	tbl := buildTable(s, namespaced)
-	tbl.NoHeaders = noHeaders
+	var cols, wideCols columnSet
+	namespaced, anyOK := false, false
+	for _, res := range results {
+		if res.Err == nil {
+			if !anyOK {
+				namespaced, anyOK = res.Value.namespaced, true
+			}
+			cols.add(res.Value.columns...)
+		}
+	}
+	for _, res := range results {
+		if res.Err == nil {
+			for _, c := range res.Value.wideColumns {
+				if !cols.has(c) {
+					wideCols.add(c)
+				}
+			}
+		}
+	}
+	if !anyOK {
+		s := fallbackSchema(kind)
+		namespaced = s.Namespaced
+		cols.add(s.Headers...)
+		wideCols.add(s.WideHeaders...)
+	}
+
+	headers := []string{"CONTEXT"}
+	if namespaced {
+		headers = append(headers, "NAMESPACE")
+	}
+	tbl := &output.Table{
+		Headers:     append(headers, cols.names...),
+		WideHeaders: append(append([]string{}, wideCols.names...), "ERROR"),
+		NoHeaders:   noHeaders,
+	}
+	prefix := len(headers)
 	for _, res := range results {
 		if res.Err != nil {
 			// -o name feeds scripts; an "<error>" placeholder there would read
 			// as an object name. The stderr warning reports it.
 			if f != output.FormatName {
-				appendErrorRow(tbl, res.Context, namespaced, s, res.Err)
+				row := make([]string, len(tbl.Headers))
+				row[0], row[prefix] = res.Context, "<error>"
+				wide := make([]string, len(tbl.WideHeaders))
+				wide[len(wide)-1] = res.Err.Error()
+				tbl.Append(row, wide)
 			}
 			continue
 		}
-		for j, row := range res.Value.rows {
-			var wide []string
-			if j < len(res.Value.wide) {
-				wide = res.Value.wide[j]
+		v := res.Value
+		nsCols := 0
+		if v.namespaced {
+			nsCols = 1
+		}
+		for j, src := range v.rows {
+			row := make([]string, len(tbl.Headers))
+			wide := make([]string, len(tbl.WideHeaders))
+			row[0] = res.Context
+			if nsCols == 1 && namespaced {
+				row[1] = src[0]
 			}
-			tbl.Append(append([]string{res.Context}, row...), wide)
+			place := func(name, cell string) {
+				if i, ok := cols.index[name]; ok {
+					row[prefix+i] = cell
+				} else if i, ok := wideCols.index[name]; ok {
+					wide[i] = cell
+				}
+			}
+			for i, name := range v.columns {
+				if nsCols+i < len(src) {
+					place(name, src[nsCols+i])
+				}
+			}
+			if j < len(v.wide) {
+				for i, name := range v.wideColumns {
+					if i < len(v.wide[j]) {
+						place(name, v.wide[j][i])
+					}
+				}
+			}
+			tbl.Append(row, wide)
 		}
 	}
 	return tbl
+}
+
+// columnSet is an ordered set of column names.
+type columnSet struct {
+	names []string
+	index map[string]int
+}
+
+// add merges one context's ordered columns: a column not yet in the set is
+// inserted right after the column that precedes it in names, so a column a
+// newer cluster adds keeps its place (OWNER before AGE, not after it).
+func (c *columnSet) add(names ...string) {
+	prev := -1
+	for k, n := range names {
+		if i, ok := c.index[n]; ok {
+			prev = i
+			continue
+		}
+		at := prev + 1
+		if prev < 0 {
+			// No known column before it: go just before the next known one,
+			// or at the end when none of this context's columns are known.
+			at = len(c.names)
+			for _, next := range names[k+1:] {
+				if i, ok := c.index[next]; ok {
+					at = i
+					break
+				}
+			}
+		}
+		prev = at
+		c.names = append(c.names[:at], append([]string{n}, c.names[at:]...)...)
+		c.index = make(map[string]int, len(c.names))
+		for i, name := range c.names {
+			c.index[name] = i
+		}
+	}
+}
+
+func (c *columnSet) has(name string) bool {
+	_, ok := c.index[name]
+	return ok
 }
 
 func writeList(w io.Writer, items [][]byte, f output.Format) error {
@@ -226,25 +341,17 @@ func annotateContext(u *unstructured.Unstructured, ctxName string) {
 	u.SetAnnotations(ann)
 }
 
-// schemaForResults picks a per-kind schema for the group and resource the
-// first successful cluster resolved, else printers.Generic, and returns that
-// group/resource. When no cluster succeeded it falls back to the user's input
-// (alias or resource.group) and the schema's own Namespaced declaration.
-func schemaForResults(kind string, results []fleet.ClusterResult[fetchedResource]) (printers.Schema, bool, schema.GroupResource) {
-	for _, r := range results {
-		if r.Err == nil && r.Value.resource != "" {
-			gr := schema.GroupResource{Group: r.Value.group, Resource: r.Value.resource}
-			return schemaFor(gr), r.Value.namespaced, gr
-		}
-	}
+// fallbackSchema is the built-in schema for the user's kind (alias or
+// resource.group), used for the header when no context succeeded.
+func fallbackSchema(kind string) printers.Schema {
 	s, ok := printers.For(kind)
 	if gr := schema.ParseGroupResource(kind); gr.Group != "" {
 		s, ok = printers.ForGroupResource(gr.Group, gr.Resource)
 	}
 	if !ok {
-		s = printers.Generic()
+		return printers.Generic()
 	}
-	return s, s.Namespaced, schema.GroupResource{}
+	return s
 }
 
 // schemaFor returns the per-kind schema registered for gr, else Generic.
@@ -255,40 +362,13 @@ func schemaFor(gr schema.GroupResource) printers.Schema {
 	return printers.Generic()
 }
 
-func buildTable(s printers.Schema, namespaced bool) *output.Table {
-	headers := []string{"CONTEXT"}
-	if namespaced {
-		headers = append(headers, "NAMESPACE")
-	}
-	headers = append(headers, s.Headers...)
-	wide := append([]string{}, s.WideHeaders...)
-	wide = append(wide, "ERROR")
-	return &output.Table{Headers: headers, WideHeaders: wide}
-}
-
-func appendErrorRow(tbl *output.Table, ctx string, namespaced bool, s printers.Schema, err error) {
-	row := []string{ctx}
-	if namespaced {
-		row = append(row, "")
-	}
-	// First per-kind column holds "<error>" so the default table view stays
-	// informative without forcing -o wide.
-	for i := range s.Headers {
-		if i == 0 {
-			row = append(row, "<error>")
-		} else {
-			row = append(row, "")
-		}
-	}
-	wide := make([]string, len(s.WideHeaders))
-	wide = append(wide, err.Error())
-	tbl.Append(row, wide)
-}
-
 // getOne fetches req.kind (and optionally req.name) from one context and
-// projects each object into req.format as it arrives. Without -A the
-// namespace is resolved per context: --namespace, else that context's own
-// namespace, else "default".
+// projects each object into req.format as it arrives. Table output uses the
+// server-rendered table (kubectl's columns, including a CRD's printer
+// columns) unless --server-print=false or the server cannot render one, in
+// which case the built-in printers are used. Without -A the namespace is
+// resolved per context: --namespace, else that context's own namespace, else
+// "default".
 func getOne(ctx context.Context, kc *kubeconfig.Context, req getRequest) (fetchedResource, error) {
 	clients, err := k8s.New(kc)
 	if err != nil {
@@ -298,19 +378,116 @@ func getOne(ctx context.Context, kc *kubeconfig.Context, req getRequest) (fetche
 	if err != nil {
 		return fetchedResource{}, err
 	}
-	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource, group: gvr.Group}
+	base := fetchedResource{namespaced: namespaced, resource: gvr.Resource, group: gvr.Group}
 	ns := ""
 	if namespaced && !req.allNamespaces {
 		if ns, err = kc.Namespace(); err != nil {
-			return out, err
+			return base, err
 		}
 	}
 
+	// A namespaced name with -A has no single object URL, so it becomes a
+	// list across all namespaces filtered by name: it finds every namespace,
+	// on every cluster, that holds an object of that name.
+	listOpts := metav1.ListOptions{LabelSelector: req.selector}
+	getByName := req.name != ""
+	if getByName && namespaced && req.allNamespaces {
+		listOpts.FieldSelector = fields.OneTermEqualSelector("metadata.name", req.name).String()
+		getByName = false
+	}
+
+	if req.serverPrint && !req.format.Structured() {
+		out := base
+		err := fetchServerTable(ctx, clients, gvr, ns, req, getByName, listOpts, &out)
+		if !errors.Is(err, k8s.ErrNoTable) {
+			return out, err
+		}
+	}
+	out := base
+	return out, fetchObjects(ctx, clients, gvr, kc.Name(), ns, req, getByName, listOpts, &out)
+}
+
+// fetchServerTable fills out from the server-rendered table. It returns
+// k8s.ErrNoTable, with nothing kept, when the server cannot render one.
+func fetchServerTable(ctx context.Context, clients *k8s.Clients, gvr schema.GroupVersionResource, ns string, req getRequest, getByName bool, listOpts metav1.ListOptions, out *fetchedResource) error {
+	tables, err := k8s.NewTables(clients.REST, gvr)
+	if err != nil {
+		return err
+	}
+	var colIdx, wideIdx []int
+	addPage := func(t *k8s.Table) {
+		if colIdx == nil && wideIdx == nil {
+			for i, c := range t.Columns {
+				if c.Wide {
+					wideIdx = append(wideIdx, i)
+					out.wideColumns = append(out.wideColumns, c.Name)
+				} else {
+					colIdx = append(colIdx, i)
+					out.columns = append(out.columns, c.Name)
+				}
+			}
+		}
+		for _, r := range t.Rows {
+			out.count++
+			row := make([]string, 0, len(colIdx)+1)
+			if out.namespaced {
+				row = append(row, r.Namespace)
+			}
+			for _, i := range colIdx {
+				row = append(row, cell(r.Cells, i))
+			}
+			out.rows = append(out.rows, row)
+			if req.format == output.FormatWide {
+				wide := make([]string, 0, len(wideIdx))
+				for _, i := range wideIdx {
+					wide = append(wide, cell(r.Cells, i))
+				}
+				out.wide = append(out.wide, wide)
+			}
+		}
+	}
+
+	if getByName {
+		t, err := tables.Get(ctx, ns, req.name)
+		// Absent from some clusters is normal for a fleet, not a failure.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			if errors.Is(err, k8s.ErrNoTable) {
+				return err
+			}
+			return fmt.Errorf("get %s/%s: %w", gvr.Resource, req.name, err)
+		}
+		addPage(t)
+		return nil
+	}
+	err = tables.List(ctx, ns, listOpts, func(t *k8s.Table) error {
+		addPage(t)
+		return nil
+	})
+	if err != nil && !errors.Is(err, k8s.ErrNoTable) {
+		return fmt.Errorf("list %s: %w", gvr.Resource, err)
+	}
+	return err
+}
+
+func cell(cells []string, i int) string {
+	if i < len(cells) {
+		return cells[i]
+	}
+	return ""
+}
+
+// fetchObjects fills out from full objects: compact JSON for -o json|yaml,
+// or rows from the built-in printers.
+func fetchObjects(ctx context.Context, clients *k8s.Clients, gvr schema.GroupVersionResource, ctxName, ns string, req getRequest, getByName bool, listOpts metav1.ListOptions, out *fetchedResource) error {
 	s := schemaFor(gvr.GroupResource())
+	out.columns, out.wideColumns = s.Headers, s.WideHeaders
 	add := func(u *unstructured.Unstructured) error {
 		out.count++
 		if req.format.Structured() {
-			annotateContext(u, kc.Name())
+			annotateContext(u, ctxName)
 			b, err := json.Marshal(u.Object)
 			if err != nil {
 				return fmt.Errorf("encode %s/%s: %w", gvr.Resource, u.GetName(), err)
@@ -319,39 +496,33 @@ func getOne(ctx context.Context, kc *kubeconfig.Context, req getRequest) (fetche
 			return nil
 		}
 		cols, wide := s.Row(u)
-		if namespaced {
+		if out.namespaced {
 			cols = append([]string{u.GetNamespace()}, cols...)
 		}
 		out.rows = append(out.rows, cols)
 		if req.format == output.FormatWide {
-			out.wide = append(out.wide, append(wide, ""))
+			out.wide = append(out.wide, wide)
 		}
 		return nil
 	}
 
-	// A namespaced name with -A has no single object URL, so it becomes a
-	// list across all namespaces filtered by name: it finds every namespace,
-	// on every cluster, that holds an object of that name.
-	listOpts := metav1.ListOptions{LabelSelector: req.selector}
-	if req.name != "" && namespaced && req.allNamespaces {
-		listOpts.FieldSelector = fields.OneTermEqualSelector("metadata.name", req.name).String()
-	} else if req.name != "" {
+	if getByName {
 		u, err := clients.Dynamic.Resource(gvr).Namespace(ns).Get(ctx, req.name, metav1.GetOptions{})
 		// Absent from some clusters is normal for a fleet, not a failure.
 		if apierrors.IsNotFound(err) {
-			return out, nil
+			return nil
 		}
 		if err != nil {
-			return out, fmt.Errorf("get %s/%s: %w", gvr.Resource, req.name, err)
+			return fmt.Errorf("get %s/%s: %w", gvr.Resource, req.name, err)
 		}
-		return out, add(u)
+		return add(u)
 	}
 	// Page through the list as kubectl does (500 per request) so large
 	// clusters are not asked to serialise every object in one response.
 	lister := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 		return clients.Dynamic.Resource(gvr).Namespace(ns).List(ctx, opts)
 	})
-	err = lister.EachListItem(ctx, listOpts, func(obj runtime.Object) error {
+	err := lister.EachListItem(ctx, listOpts, func(obj runtime.Object) error {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok {
 			return fmt.Errorf("unexpected list item %T", obj)
@@ -359,7 +530,7 @@ func getOne(ctx context.Context, kc *kubeconfig.Context, req getRequest) (fetche
 		return add(u)
 	})
 	if err != nil {
-		return out, fmt.Errorf("list %s: %w", gvr.Resource, err)
+		return fmt.Errorf("list %s: %w", gvr.Resource, err)
 	}
-	return out, nil
+	return nil
 }

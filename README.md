@@ -118,6 +118,13 @@ dev-local    k3d-dev       kube-system   no          -           -
 Parallel `kubectl get` across selected contexts. Adds a leading `CONTEXT`
 column so identically-named resources across clusters are easy to compare.
 
+Columns are rendered by each API server, exactly as `kubectl get` shows them,
+including a CRD's own printer columns (an Argo CD `Application` shows its sync
+and health status). When clusters run different versions and render
+different columns, they are merged by name and a cluster leaves blank what
+it lacks. `--server-print=false` uses the plugin's built-in columns instead,
+which is also the automatic fallback for an API that cannot render tables.
+
 ```bash
 # pods across the whole fleet, every namespace
 kubectl fleet get pods -A
