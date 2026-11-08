@@ -18,6 +18,9 @@ import (
 
 // Clients bundles the three flavours of client kubectl-fleet uses.
 type Clients struct {
+	// REST is the context's REST config, for clients built per resource
+	// (see NewTables).
+	REST      *rest.Config
 	Typed     kubernetes.Interface
 	Dynamic   dynamic.Interface
 	Discovery discovery.DiscoveryInterface
@@ -55,7 +58,7 @@ func New(src Source) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("discovery client: %w", err)
 	}
-	return &Clients{Typed: typed, Dynamic: dyn, Discovery: disco}, nil
+	return &Clients{REST: restCfg, Typed: typed, Dynamic: dyn, Discovery: disco}, nil
 }
 
 // ResolveGVR maps a user-supplied kind shorthand to a GroupVersionResource by
