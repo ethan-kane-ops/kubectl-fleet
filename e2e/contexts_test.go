@@ -5,7 +5,7 @@ package e2e
 import "testing"
 
 func TestE2E_ContextsCheck(t *testing.T) {
-	rows, code := runJSON(t, "contexts", "--check", "--filter", "^kind-fleet-e2e-")
+	rows, code := runJSON[[]map[string]string](t, "contexts", "--check", "--filter", "^kind-fleet-e2e-")
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}

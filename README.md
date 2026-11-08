@@ -142,7 +142,7 @@ prod-ap-1    payments     api-9b2a4e1d3-klmno           1h
 ```
 
 Failed clusters never abort the run. Per-context errors land in the table with
-`<error>` in the `NAME` column (left out of `-o name`) and surface a `warn:`
+`<error>` in the `NAME` column (left out of `-o name|json|yaml`) and surface a `warn:`
 line on stderr. Without `-n` or `-A`, each context is queried in its own
 namespace, falling back to `default`. `get <kind> <name>` skips contexts that
 don't have the object and errors only when none of them do.
@@ -156,7 +156,7 @@ crashlooping; completed Job pods don't count).
 ```bash
 kubectl fleet status
 kubectl fleet status --contexts '^prod-' -o wide
-kubectl fleet status -o json | jq '.[] | select(.PodsCrashLoop > 0)'
+kubectl fleet status -o json | jq '.[] | select(.podsCrashLoop > 0) | .context'
 ```
 
 Wide output adds `FAILED`, `TOTAL_PODS`, `TOP_NOISY`, and `ERROR` columns.
@@ -169,11 +169,27 @@ Every command honours `-o`:
 | --------- | ------------------------------------------------------ |
 | `table`   | Default. Human-readable, fixed column widths.          |
 | `wide`    | `table` + additional diagnostic columns where useful.  |
-| `json`    | Machine-readable, one document per row.                |
+| `json`    | Machine-readable; shape per command, below.            |
 | `yaml`    | Same data as `json`, YAML-encoded.                     |
+| `name`    | `context/namespace/name` per line, for scripting.      |
 
-Pipe `-o json` into `jq` or `-o yaml` into `yq` for further filtering and
-scripting.
+`json` and `yaml` shapes:
+
+- `get`: a `v1 List` of the full objects, as `kubectl get -o json` prints.
+  Each object carries a `kubectl-fleet/context` annotation naming its context.
+- `status`: an array of per-context records (`context`, `serverVersion`,
+  `nodesReady`, `podsCrashLoop`, `topNoisyNamespaces`, ...). A failed context
+  has only `context` and `error`.
+- `contexts`, `version`: one object per table row, keyed by column header.
+
+Failed contexts are left out of `get`'s `json`, `yaml` and `name` output and
+reported on stderr instead.
+
+```bash
+kubectl fleet get deploy -A -o json \
+  | jq -r '.items[] | select(.status.readyReplicas != .spec.replicas)
+           | "\(.metadata.annotations["kubectl-fleet/context"])/\(.metadata.name)"'
+```
 
 ## Flags inherited from kubectl
 

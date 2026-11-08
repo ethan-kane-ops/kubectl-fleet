@@ -7,8 +7,14 @@ import (
 	"time"
 )
 
+type statusRecord struct {
+	Context       string `json:"context"`
+	PodsCrashLoop int    `json:"podsCrashLoop"`
+	Error         string `json:"error"`
+}
+
 func TestE2E_Status(t *testing.T) {
-	var rows []map[string]string
+	var rows []statusRecord
 	var code int
 
 	// CrashLoopBackOff continuously cycles (kubelet retries, briefly clears
@@ -17,31 +23,31 @@ func TestE2E_Status(t *testing.T) {
 	// one-time precondition check elsewhere to still hold by the time this
 	// runs.
 	ok := eventually(crashloopWaitTimeout, 3*time.Second, func() bool {
-		rows, code = runJSON(t, "status", "--contexts", "^kind-fleet-e2e-")
+		rows, code = runJSON[[]statusRecord](t, "status", "--contexts", "^kind-fleet-e2e-")
 		if code != 0 {
 			return false
 		}
 		for _, r := range rows {
-			if r["CONTEXT"] == contextB && r["CRASHLOOP"] != "" && r["CRASHLOOP"] != "0" {
+			if r.Context == contextB && r.PodsCrashLoop > 0 {
 				return true
 			}
 		}
 		return false
 	})
 	if !ok {
-		t.Fatalf("%s never reported CRASHLOOP>0 within %s; last rows: %+v\n%s",
+		t.Fatalf("%s never reported podsCrashLoop>0 within %s; last rows: %+v\n%s",
 			contextB, crashloopWaitTimeout, rows, describePods(contextB, "payments", "app=crashy"))
 	}
 
-	byCtx := map[string]map[string]string{}
+	byCtx := map[string]statusRecord{}
 	for _, r := range rows {
-		byCtx[r["CONTEXT"]] = r
+		byCtx[r.Context] = r
 	}
 	a, ok := byCtx[contextA]
 	if !ok {
 		t.Fatalf("missing row for %s: %+v", contextA, rows)
 	}
-	if a["CRASHLOOP"] != "0" {
-		t.Errorf("%s CRASHLOOP = %q, want 0", contextA, a["CRASHLOOP"])
+	if a.Error != "" || a.PodsCrashLoop != 0 {
+		t.Errorf("%s = %+v, want no error and podsCrashLoop 0", contextA, a)
 	}
 }

@@ -72,12 +72,13 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			schema, namespaced := schemaForResults(kind, results)
 			tbl := buildTable(schema, namespaced)
 			tbl.NoHeaders = noHeaders
+			list := newFleetList()
 			found := 0
 			for _, res := range results {
 				if res.Err != nil {
-					// -o name feeds scripts; a "<error>" placeholder there would
-					// read as an object name. The stderr warning still reports it.
-					if f != output.FormatName {
+					// -o name and json/yaml feed scripts; an "<error>" placeholder
+					// there would read as an object. The stderr warning reports it.
+					if f != output.FormatName && !f.Structured() {
 						appendErrorRow(tbl, res.Context, namespaced, schema, res.Err)
 					}
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
@@ -92,12 +93,18 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 						prefix = append(prefix, u.GetNamespace())
 					}
 					tbl.Append(append(prefix, cols...), append(wide, ""))
+					list.Items = append(list.Items, withContext(u, res.Context))
 				}
 			}
 			if name != "" && found == 0 {
 				return fmt.Errorf("%s %q not found in any reachable context", kind, name)
 			}
-			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
+			if f.Structured() {
+				err = output.Encode(cmd.OutOrStdout(), list, f)
+			} else {
+				err = output.Print(cmd.OutOrStdout(), tbl, f)
+			}
+			if err != nil {
 				return err
 			}
 			if strict {
@@ -116,6 +123,33 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
 	return c
+}
+
+// ContextAnnotation names the kubeconfig context an object came from in
+// `get -o json|yaml` output.
+const ContextAnnotation = "kubectl-fleet/context"
+
+// newFleetList returns an empty v1 List, the shape kubectl prints for
+// `get -o json` over several objects.
+func newFleetList() *unstructured.UnstructuredList {
+	return &unstructured.UnstructuredList{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "List",
+		"metadata":   map[string]any{"resourceVersion": ""},
+	}}
+}
+
+// withContext returns a copy of u annotated with the context it came from, so
+// objects with the same name on different clusters stay distinguishable.
+func withContext(u *unstructured.Unstructured, ctxName string) unstructured.Unstructured {
+	out := u.DeepCopy()
+	ann := out.GetAnnotations()
+	if ann == nil {
+		ann = map[string]string{}
+	}
+	ann[ContextAnnotation] = ctxName
+	out.SetAnnotations(ann)
+	return *out
 }
 
 // schemaForResults picks a per-kind schema based on the resolved GVR resource

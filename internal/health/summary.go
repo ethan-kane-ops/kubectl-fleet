@@ -23,24 +23,26 @@ type Options struct {
 	Since time.Duration
 }
 
-// Summary is the per-cluster snapshot.
+// Summary is the per-cluster snapshot. The JSON tags are the -o json/yaml
+// contract of `kubectl fleet status`.
 type Summary struct {
-	ServerVersion         string
-	NodesReady            int
-	NodesTotal            int
-	PodsRunning           int
-	PodsPending           int
-	PodsCrashLoop         int
-	PodsFailed            int
-	PodsTotal             int
-	PodsRestartedInWindow int
-	TopNoisyNS            []NamespaceNoise
+	ServerVersion         string           `json:"serverVersion"`
+	NodesReady            int              `json:"nodesReady"`
+	NodesTotal            int              `json:"nodesTotal"`
+	PodsRunning           int              `json:"podsRunning"`
+	PodsPending           int              `json:"podsPending"`
+	PodsCrashLoop         int              `json:"podsCrashLoop"`
+	PodsFailed            int              `json:"podsFailed"`
+	PodsTotal             int              `json:"podsTotal"`
+	PodsRestartedInWindow int              `json:"podsRestartedInWindow"`
+	TopNoisyNS            []NamespaceNoise `json:"topNoisyNamespaces"`
 }
 
-// NamespaceNoise reports a single namespace's non-Running pod count.
+// NamespaceNoise reports a single namespace's unhealthy pod count: Pending,
+// Failed, Unknown or crashlooping, each pod counted once.
 type NamespaceNoise struct {
-	Namespace  string
-	NonRunning int
+	Namespace string `json:"namespace"`
+	Unhealthy int    `json:"unhealthy"`
 }
 
 // Summarize gathers the nodes/pods/version snapshot for one cluster.
@@ -178,11 +180,11 @@ func countRestartsInWindow(p *corev1.Pod, cutoff time.Time) int {
 func topNoisy(m map[string]int, n int) []NamespaceNoise {
 	out := make([]NamespaceNoise, 0, len(m))
 	for k, v := range m {
-		out = append(out, NamespaceNoise{Namespace: k, NonRunning: v})
+		out = append(out, NamespaceNoise{Namespace: k, Unhealthy: v})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].NonRunning != out[j].NonRunning {
-			return out[i].NonRunning > out[j].NonRunning
+		if out[i].Unhealthy != out[j].Unhealthy {
+			return out[i].Unhealthy > out[j].Unhealthy
 		}
 		return out[i].Namespace < out[j].Namespace
 	})

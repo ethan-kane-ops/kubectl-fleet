@@ -57,8 +57,10 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			wideHeaders := []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"}
 			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: noHeaders}
 
+			records := make([]statusRecord, 0, len(results))
 			for _, res := range results {
 				if res.Err != nil {
+					records = append(records, statusRecord{Context: res.Context, Error: res.Err.Error()})
 					row := []string{res.Context, "?", "?", "?", "?", "?"}
 					if since > 0 {
 						row = append(row, "?")
@@ -68,6 +70,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					continue
 				}
 				s := res.Value
+				records = append(records, statusRecord{Context: res.Context, Summary: &s})
 				row := []string{
 					res.Context,
 					s.ServerVersion,
@@ -86,7 +89,12 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					"",
 				})
 			}
-			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
+			if f.Structured() {
+				err = output.Encode(cmd.OutOrStdout(), records, f)
+			} else {
+				err = output.Print(cmd.OutOrStdout(), tbl, f)
+			}
+			if err != nil {
 				return err
 			}
 			if strict {
@@ -106,6 +114,14 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	return c
 }
 
+// statusRecord is one context's entry in `status -o json|yaml`. A failed
+// context carries only Context and Error.
+type statusRecord struct {
+	Context string `json:"context"`
+	*health.Summary
+	Error string `json:"error,omitempty"`
+}
+
 func statusOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, opts health.Options) (health.Summary, error) {
 	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
 	if err != nil {
@@ -120,7 +136,7 @@ func formatNoisy(ns []health.NamespaceNoise) string {
 	}
 	parts := make([]string, 0, len(ns))
 	for _, n := range ns {
-		parts = append(parts, fmt.Sprintf("%s(%d)", n.Namespace, n.NonRunning))
+		parts = append(parts, fmt.Sprintf("%s(%d)", n.Namespace, n.Unhealthy))
 	}
 	return strings.Join(parts, ",")
 }
