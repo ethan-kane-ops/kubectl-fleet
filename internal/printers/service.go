@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 func init() {
@@ -115,9 +116,9 @@ func serviceSelector(obj map[string]interface{}) string {
 	if len(m) == 0 {
 		return "<none>"
 	}
-	parts := make([]string, 0, len(m))
+	set := labels.Set{}
 	for k, v := range m {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+		set[k] = fmt.Sprint(v)
 	}
-	return strings.Join(parts, ",")
+	return set.String() // sorted by key
 }
