@@ -16,11 +16,13 @@ import (
 
 // fakeCluster is a minimal API server: discovery for core/v1 pods and nodes,
 // /version, and pod list/get. Pod lists honour a metadata.name field
-// selector. Pod lists page by the request's limit so the
-// pager path is exercised. Every request path is recorded.
+// selector and page by the request's limit so the pager path is exercised.
+// widgetGroup, when set, adds a cluster-scoped "widgets" resource (always
+// empty) in that API group. Every request path is recorded.
 type fakeCluster struct {
-	pods  []fakePod
-	delay time.Duration
+	pods        []fakePod
+	delay       time.Duration
+	widgetGroup string
 
 	mu       sync.Mutex
 	requests []string
@@ -67,7 +69,19 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	case p == "/api":
 		writeJSON(w, map[string]any{"kind": "APIVersions", "versions": []string{"v1"}})
 	case p == "/apis":
-		writeJSON(w, map[string]any{"kind": "APIGroupList", "apiVersion": "v1", "groups": []any{}})
+		groups := []any{}
+		if f.widgetGroup != "" {
+			gv := map[string]any{"groupVersion": f.widgetGroup + "/v1", "version": "v1"}
+			groups = append(groups, map[string]any{"name": f.widgetGroup, "versions": []any{gv}, "preferredVersion": gv})
+		}
+		writeJSON(w, map[string]any{"kind": "APIGroupList", "apiVersion": "v1", "groups": groups})
+	case f.widgetGroup != "" && p == "/apis/"+f.widgetGroup+"/v1":
+		writeJSON(w, map[string]any{
+			"kind": "APIResourceList", "groupVersion": f.widgetGroup + "/v1",
+			"resources": []map[string]any{{"name": "widgets", "singularName": "widget", "namespaced": false, "kind": "Widget", "verbs": []string{"get", "list"}}},
+		})
+	case f.widgetGroup != "" && p == "/apis/"+f.widgetGroup+"/v1/widgets":
+		writeJSON(w, map[string]any{"kind": "WidgetList", "apiVersion": f.widgetGroup + "/v1", "metadata": map[string]any{}, "items": []any{}})
 	case p == "/api/v1":
 		writeJSON(w, map[string]any{
 			"kind": "APIResourceList", "groupVersion": "v1",

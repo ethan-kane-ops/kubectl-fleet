@@ -281,10 +281,31 @@ func TestSchemaForResultsMatchesGroup(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, _ := schemaForResults(tc.kind, tc.results)
+			s, _, _ := schemaForResults(tc.kind, tc.results)
 			if s.Headers[1] != tc.wantFirst {
 				t.Errorf("headers=%v want second column %s", s.Headers, tc.wantFirst)
 			}
 		})
+	}
+}
+
+func TestGetReportsContextsResolvingAnotherGroup(t *testing.T) {
+	a, b := &fakeCluster{widgetGroup: "a.example.io"}, &fakeCluster{widgetGroup: "b.example.io"}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "a", server: a.start(t)},
+		fakeContext{name: "b", server: b.start(t)},
+	)
+	c := newGetCmd(newFlags(path))
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"widgets", "--strict"})
+	err := c.Execute()
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 contexts failed") {
+		t.Fatalf("want b counted as failed under --strict, got %v", err)
+	}
+	want := "warn: b: widgets resolves to widgets.b.example.io here, not widgets.a.example.io"
+	if !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr=%q want %q", stderr.String(), want)
 	}
 }
