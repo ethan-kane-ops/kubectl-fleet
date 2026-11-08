@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -55,6 +56,7 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		labelSelector string
 		allNamespaces bool
 		serverPrint   bool
+		problemsOnly  bool
 	)
 	c := &cobra.Command{
 		Use:   "get <kind> [name]",
@@ -72,6 +74,9 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			f, err := o.format()
 			if err != nil {
 				return err
+			}
+			if problemsOnly && f.Structured() {
+				return fmt.Errorf("--problems works with table, wide and name output")
 			}
 			cfg, err := kubeconfig.Load(kubeFlags)
 			if err != nil {
@@ -100,6 +105,8 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			}
 			var (
 				collected []fleet.ClusterResult[fetchedResource] // table, wide, name
+				anyOK     bool                                   // --problems: some context answered
+				anyJudged bool                                   // --problems: some context had STATUS or READY
 				encoded   [][]byte                               // buffered json/yaml
 				chosen    *schema.GroupResource
 				found     int
@@ -125,6 +132,12 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				}
 				switch {
 				case !f.Structured():
+					if problemsOnly && res.Err == nil {
+						anyOK = true
+						if keepProblems(&res.Value) {
+							anyJudged = true
+						}
+					}
 					collected = append(collected, res)
 				case res.Err != nil:
 				case lw != nil:
@@ -139,6 +152,9 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			})
 			if writeErr != nil {
 				return writeErr
+			}
+			if problemsOnly && anyOK && !anyJudged {
+				return fmt.Errorf("--problems needs a READY or STATUS column; %s has neither", kind)
 			}
 
 			switch {
@@ -160,11 +176,37 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	}
 	c.Flags().StringVarP(&labelSelector, "selector", "l", "", "label selector")
 	c.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "query across all namespaces")
+	c.Flags().BoolVar(&problemsOnly, "problems", false, "show only unhealthy rows: STATUS not healthy (Running, Completed, Ready, Bound…) or READY short (1/2)")
 	c.Flags().BoolVar(&serverPrint, "server-print", true, "let each API server render the table columns, as kubectl does; false uses built-in columns")
 	o.addFlags(c, defaultGetParallelism)
 	o.addErrorsFlag(c)
 	c.Flags().Lookup("parallelism").Usage = "max contexts queried at once (0=unbounded); each in-flight context holds a page of up to 500 decoded objects"
 	return c
+}
+
+// keepProblems trims a context's rows to the unhealthy ones (problemRow).
+// It returns false, keeping no rows, when the context's columns have neither
+// STATUS nor READY to judge by.
+func keepProblems(v *fetchedResource) bool {
+	if !slices.Contains(v.columns, "STATUS") && !slices.Contains(v.columns, "READY") {
+		v.rows, v.wide = nil, nil
+		return false
+	}
+	off := 0
+	if v.namespaced {
+		off = 1
+	}
+	var rows, wide [][]string
+	for j, row := range v.rows {
+		if problem, _ := problemRow(v.columns, row[min(off, len(row)):]); problem {
+			rows = append(rows, row)
+			if j < len(v.wide) {
+				wide = append(wide, v.wide[j])
+			}
+		}
+	}
+	v.rows, v.wide = rows, wide
+	return true
 }
 
 // ContextAnnotation names the kubeconfig context an object came from in

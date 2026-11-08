@@ -33,6 +33,9 @@ type fakeCluster struct {
 	gitVersion    string
 	nodes         int
 	notReadyNodes int // the last notReadyNodes of nodes report Ready=False
+	// podStatus overrides a pod's table STATUS by name; such a pod also
+	// reports READY 0/1.
+	podStatus map[string]string
 
 	mu       sync.Mutex
 	requests []string
@@ -189,7 +192,11 @@ func (f *fakeCluster) podTable(meta map[string]any, pods []fakePod) map[string]a
 	cols = append(cols, map[string]any{"name": "Age", "priority": 0}, map[string]any{"name": "IP", "priority": 1}, map[string]any{"name": "Node", "priority": 1})
 	rows := make([]any, 0, len(pods))
 	for _, p := range pods {
-		cells := []any{p.name, "1/1", "Running", 3}
+		ready, status := "1/1", "Running"
+		if st, ok := f.podStatus[p.name]; ok {
+			ready, status = "0/1", st
+		}
+		cells := []any{p.name, ready, status, 3}
 		if f.extraColumn != "" {
 			cells = append(cells, "x")
 		}
