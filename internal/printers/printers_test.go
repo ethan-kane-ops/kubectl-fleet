@@ -465,3 +465,28 @@ func TestSelectorsAreStableAndComplete(t *testing.T) {
 		})
 	}
 }
+
+func TestNodeStatus(t *testing.T) {
+	type m = map[string]interface{}
+	ready := m{"type": "Ready", "status": "True"}
+	cases := []struct {
+		name string
+		obj  m
+		want string
+	}{
+		{"ready", m{"status": m{"conditions": []interface{}{ready}}}, "Ready"},
+		{"cordoned", m{"spec": m{"unschedulable": true}, "status": m{"conditions": []interface{}{ready}}}, "Ready,SchedulingDisabled"},
+		{"no ready condition", m{"status": m{}}, "Unknown"},
+		{"cordoned with pressure", m{
+			"spec":   m{"unschedulable": true},
+			"status": m{"conditions": []interface{}{m{"type": "Ready", "status": "False"}, m{"type": "MemoryPressure", "status": "True"}}},
+		}, "NotReady,SchedulingDisabled,MemoryPressure"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nodeStatus(tc.obj); got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
