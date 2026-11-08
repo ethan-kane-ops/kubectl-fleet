@@ -58,19 +58,9 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				return fmt.Errorf("no matching contexts")
 			}
 
-			ns := ""
-			if kubeFlags.Namespace != nil {
-				ns = *kubeFlags.Namespace
-			}
-			if allNamespaces {
-				ns = ""
-			} else if ns == "" {
-				ns = defaultNamespaceFromContexts(refs)
-			}
-
 			results := fleet.Run(cmd.Context(), refs, parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
-					return getOne(ctx, kubeFlags, r, kind, name, ns, allNamespaces, labelSelector)
+					return getOne(ctx, kubeFlags, r, kind, name, allNamespaces, labelSelector)
 				})
 
 			schema, namespaced := schemaForResults(kind, results)
@@ -111,15 +101,6 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
 	return c
-}
-
-func defaultNamespaceFromContexts(refs []kubeconfig.ContextRef) string {
-	for _, r := range refs {
-		if r.Namespace != "" {
-			return r.Namespace
-		}
-	}
-	return "default"
 }
 
 // schemaForResults picks a per-kind schema based on the resolved GVR resource
@@ -186,7 +167,10 @@ func appendErrorRow(tbl *output.Table, ctx string, namespaced bool, s printers.S
 	tbl.Append(row, wide)
 }
 
-func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, kind, name, ns string, allNS bool, selector string) (fetchedResource, error) {
+// getOne fetches kind (and optionally name) from one context. Without -A the
+// namespace is resolved per context: --namespace, else that context's own
+// namespace, else "default".
+func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, kind, name string, allNS bool, selector string) (fetchedResource, error) {
 	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
 	if err != nil {
 		return fetchedResource{}, err
@@ -196,8 +180,11 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 		return fetchedResource{}, err
 	}
 	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource}
-	if !namespaced || allNS {
-		ns = ""
+	ns := ""
+	if namespaced && !allNS {
+		if ns, err = kubeconfig.NamespaceFor(kubeFlags, r.Name); err != nil {
+			return out, err
+		}
 	}
 
 	if name != "" {
