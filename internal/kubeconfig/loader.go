@@ -3,8 +3,11 @@ package kubeconfig
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"sort"
+	"sync"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
@@ -96,11 +99,52 @@ func ForContext(kubeFlags *genericclioptions.ConfigFlags, ctxName string) *gener
 		f.Password = kubeFlags.Password
 		f.Timeout = kubeFlags.Timeout
 		f.DisableCompression = kubeFlags.DisableCompression
-		f.WrapConfigFn = kubeFlags.WrapConfigFn
+	}
+	var userWrap func(*rest.Config) *rest.Config
+	if kubeFlags != nil {
+		userWrap = kubeFlags.WrapConfigFn
+	}
+	f.WrapConfigFn = func(c *rest.Config) *rest.Config {
+		if userWrap != nil {
+			c = userWrap(c)
+		}
+		c.WarningHandler = serverWarnings.forContext(ctxName)
+		return c
 	}
 	f.Context = &ctxName
 	return f
 }
+
+// serverWarnings prints API server warnings (deprecated APIs and the like)
+// to stderr as "warn: <context>: <message>", each once per run. client-go's
+// default handler logs through klog, which main discards.
+var serverWarnings = &warningPrinter{out: os.Stderr, seen: map[string]bool{}}
+
+type warningPrinter struct {
+	mu   sync.Mutex
+	out  io.Writer
+	seen map[string]bool
+}
+
+func (w *warningPrinter) forContext(ctxName string) rest.WarningHandler {
+	return warningFunc(func(code int, _ string, message string) {
+		if code != 299 || message == "" {
+			return
+		}
+		key := ctxName + "\x00" + message
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if w.seen[key] {
+			return
+		}
+		w.seen[key] = true
+		_, _ = fmt.Fprintf(w.out, "warn: %s: %s\n", ctxName, message)
+	})
+}
+
+type warningFunc func(code int, agent, message string)
+
+func (f warningFunc) HandleWarningHeader(code int, agent, message string) { f(code, agent, message) }
 
 // ValidateFleetFlags rejects global kubectl flags that pin a single cluster
 // or user. Applied across a fleet they would point every context at
