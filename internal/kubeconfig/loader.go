@@ -60,6 +60,20 @@ func Contexts(cfg *clientcmdapi.Config, filter string) ([]ContextRef, error) {
 	return out, nil
 }
 
+// Select returns the contexts a command runs against: only --context when it
+// is set (overriding filter), otherwise Contexts(cfg, filter).
+func Select(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, filter string) ([]ContextRef, error) {
+	if kubeFlags == nil || kubeFlags.Context == nil || *kubeFlags.Context == "" {
+		return Contexts(cfg, filter)
+	}
+	name := *kubeFlags.Context
+	c, ok := cfg.Contexts[name]
+	if !ok {
+		return nil, fmt.Errorf("context %q not found in kubeconfig", name)
+	}
+	return []ContextRef{{Name: name, Cluster: c.Cluster, Namespace: c.Namespace, AuthInfo: c.AuthInfo}}, nil
+}
+
 // ForContext returns ConfigFlags pinned to ctxName that carry every global
 // kubectl flag the user set (--as, --token, --request-timeout, --cache-dir,
 // ...). The copy is non-persistent so each context resolves its own client
@@ -88,8 +102,8 @@ func ForContext(kubeFlags *genericclioptions.ConfigFlags, ctxName string) *gener
 	return f
 }
 
-// ValidateFleetFlags rejects global kubectl flags that pin a single cluster,
-// user or context. Applied across a fleet they would point every context at
+// ValidateFleetFlags rejects global kubectl flags that pin a single cluster
+// or user. Applied across a fleet they would point every context at
 // the same target.
 func ValidateFleetFlags(kubeFlags *genericclioptions.ConfigFlags) error {
 	if kubeFlags == nil {
@@ -100,7 +114,6 @@ func ValidateFleetFlags(kubeFlags *genericclioptions.ConfigFlags) error {
 		val  *string
 		hint string
 	}{
-		{"--context", kubeFlags.Context, "select contexts with --contexts instead"},
 		{"--cluster", kubeFlags.ClusterName, "it would point every context at one cluster"},
 		{"--server", kubeFlags.APIServer, "it would point every context at one API server"},
 		{"--tls-server-name", kubeFlags.TLSServerName, "it would apply one server name to every cluster"},
