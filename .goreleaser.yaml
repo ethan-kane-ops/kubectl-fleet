@@ -38,6 +38,10 @@ archives:
     files:
       - LICENSE*
       - README.md
+      # kubectl 1.26+ runs it for `kubectl fleet <TAB>`; install next to
+      # the binary.
+      - src: hack/kubectl_complete-fleet
+        dst: kubectl_complete-fleet
 
 checksum:
   name_template: "checksums.txt"

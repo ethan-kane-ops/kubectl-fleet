@@ -62,9 +62,22 @@ kubectl fleet --help
 
 ### Shell completion
 
-`kubectl-fleet` gets Cobra's completion generator for free. It's scoped to
-the `kubectl-fleet` binary name (not `kubectl`), so it completes direct
-invocations without touching real kubectl's own completion:
+Completion covers subcommands, flags, context names (`--context`,
+`--contexts`, `--exclude`), resource kinds and object names for `get`, and
+the values of `-o`, `--sort-by` and `--where`. Kinds and names come from
+the clusters themselves, capped at 2.5 seconds: on a large or partly
+unreachable fleet, completion offers what answered in time rather than
+hanging the shell.
+
+**`kubectl fleet <TAB>`** (kubectl 1.26+): put the `kubectl_complete-fleet`
+helper on your PATH next to `kubectl-fleet`, with kubectl's own completion
+enabled. Release archives include it; `just install` installs it.
+
+```bash
+install -m 0755 kubectl_complete-fleet "$(dirname "$(command -v kubectl-fleet)")"
+```
+
+**`kubectl-fleet <TAB>`** (calling the binary directly):
 
 ```bash
 # bash (current shell only)
@@ -78,8 +91,7 @@ kubectl-fleet completion fish | source
 ```
 
 Run `kubectl-fleet completion --help` for persistent per-shell install
-instructions. This completes `kubectl-fleet <TAB>`, not `kubectl fleet <TAB>`,
-since kubectl doesn't forward completion requests to plugins.
+instructions.
 
 ## Commands
 

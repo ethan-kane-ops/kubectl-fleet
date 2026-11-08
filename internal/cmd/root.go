@@ -52,6 +52,7 @@ func NewRootCmd() *cobra.Command {
 		newStatusCmd(kubeFlags),
 		newVersionCmd(kubeFlags),
 	)
+	registerCompletions(root, kubeFlags)
 
 	return root
 }

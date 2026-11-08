@@ -55,7 +55,10 @@ type fakePod struct{ namespace, name string }
 func (f *fakeCluster) start(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		srv.CloseClientConnections()
+		srv.Close()
+	})
 	return srv.URL
 }
 
@@ -80,7 +83,12 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	f.accept[r.URL.Path] = r.Header.Get("Accept")
 	f.mu.Unlock()
 	if f.delay > 0 {
-		time.Sleep(f.delay)
+		// End early when the client gives up, so test cleanup doesn't wait.
+		select {
+		case <-time.After(f.delay):
+		case <-r.Context().Done():
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	p := r.URL.Path

@@ -62,6 +62,15 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		Use:   "get <kind> [name]",
 		Short: "Get a resource across all matching kubeconfig contexts",
 		Args:  cobra.RangeArgs(1, 2),
+		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			switch len(args) {
+			case 0:
+				return completeKinds(kubeFlags, &o), noFiles
+			case 1:
+				return completeNames(kubeFlags, &o, args[0], allNamespaces), noFiles
+			}
+			return nil, noFiles
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kind := args[0]
 			var name string
