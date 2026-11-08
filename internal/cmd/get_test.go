@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestGetCmdArgs(t *testing.T) {
@@ -151,6 +154,54 @@ func TestGetNamedObjectAcrossFleet(t *testing.T) {
 			}
 			if stdout.String() != tc.wantOut {
 				t.Errorf("stdout=%q want %q", stdout.String(), tc.wantOut)
+			}
+		})
+	}
+}
+
+func TestListsArePaged(t *testing.T) {
+	cl := &fakeCluster{}
+	for i := range 600 {
+		cl.pods = append(cl.pods, fakePod{"default", fmt.Sprintf("p%03d", i)})
+	}
+	path := writeFakeKubeconfig(t, fakeContext{name: "big", server: cl.start(t)})
+	cases := []struct {
+		name  string
+		cmd   func() *cobra.Command
+		args  []string
+		check func(t *testing.T, out string)
+	}{
+		{"get", func() *cobra.Command { return newGetCmd(newFlags(path)) }, []string{"pods", "-o", "name"}, func(t *testing.T, out string) {
+			if n := strings.Count(out, "\n"); n != 600 {
+				t.Errorf("got %d pods want 600", n)
+			}
+		}},
+		{"status", func() *cobra.Command { return newStatusCmd(newFlags(path)) }, []string{"-o", "json"}, func(t *testing.T, out string) {
+			if !strings.Contains(out, `"TOTAL_PODS": "600"`) {
+				t.Errorf("want TOTAL_PODS 600 in:\n%s", out)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := len(cl.paths())
+			c := tc.cmd()
+			var out bytes.Buffer
+			c.SetOut(&out)
+			c.SetErr(&bytes.Buffer{})
+			c.SetArgs(tc.args)
+			if err := c.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			tc.check(t, out.String())
+			pages := 0
+			for _, p := range cl.paths()[before:] {
+				if strings.Contains(p, "/pods?") && strings.Contains(p, "limit=500") {
+					pages++
+				}
+			}
+			if pages != 2 {
+				t.Errorf("pod list requests with limit=500: %d want 2", pages)
 			}
 		})
 	}
