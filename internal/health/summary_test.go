@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -155,5 +156,50 @@ func TestIsCrashLoop(t *testing.T) {
 		if got := isCrashLoop(p); got != c.want {
 			t.Errorf("%s: isCrashLoop = %v want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestSummarizeNoisyNamespaces(t *testing.T) {
+	cases := []struct {
+		name string
+		pods []*corev1.Pod
+		want []NamespaceNoise
+	}{
+		{
+			name: "succeeded pods are not noise",
+			pods: []*corev1.Pod{
+				pod("jobs", "a", corev1.PodSucceeded, false),
+				pod("jobs", "b", corev1.PodSucceeded, false),
+				pod("web", "c", corev1.PodPending, false),
+			},
+			want: []NamespaceNoise{{"web", 1}},
+		},
+		{
+			name: "pending crashlooping pod counts once",
+			pods: []*corev1.Pod{pod("init", "a", corev1.PodPending, true)},
+			want: []NamespaceNoise{{"init", 1}},
+		},
+		{
+			name: "unknown phase is noise",
+			pods: []*corev1.Pod{pod("lost", "a", corev1.PodUnknown, false)},
+			want: []NamespaceNoise{{"lost", 1}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := fake.NewSimpleClientset()
+			for _, p := range tc.pods {
+				if err := cs.Tracker().Add(p); err != nil {
+					t.Fatalf("add pod: %v", err)
+				}
+			}
+			s, err := Summarize(context.Background(), cs, nil, Options{})
+			if err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			if !reflect.DeepEqual(s.TopNoisyNS, tc.want) {
+				t.Errorf("top noisy=%+v want %+v", s.TopNoisyNS, tc.want)
+			}
+		})
 	}
 }

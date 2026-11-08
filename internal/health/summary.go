@@ -78,20 +78,27 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 	}
 	for i := range pods.Items {
 		p := &pods.Items[i]
+		// A pod counts once towards its namespace's noise. Succeeded pods
+		// (finished Jobs) are healthy and never count.
+		noisyPod := false
 		switch p.Status.Phase {
 		case corev1.PodRunning:
 			s.PodsRunning++
+		case corev1.PodSucceeded:
 		case corev1.PodPending:
 			s.PodsPending++
-			noisy[p.Namespace]++
+			noisyPod = true
 		case corev1.PodFailed:
 			s.PodsFailed++
-			noisy[p.Namespace]++
+			noisyPod = true
 		default:
-			noisy[p.Namespace]++
+			noisyPod = true
 		}
 		if isCrashLoop(p) {
 			s.PodsCrashLoop++
+			noisyPod = true
+		}
+		if noisyPod {
 			noisy[p.Namespace]++
 		}
 		if !cutoff.IsZero() {
