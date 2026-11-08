@@ -216,9 +216,9 @@ func TestEncode(t *testing.T) {
 	}
 }
 
-// TestEncodeListMatchesWholeListEncoding pins EncodeList's streamed output
+// TestListWriterMatchesWholeListEncoding pins ListWriter's streamed output
 // to what encoding the whole List at once produces.
-func TestEncodeListMatchesWholeListEncoding(t *testing.T) {
+func TestListWriterMatchesWholeListEncoding(t *testing.T) {
 	objs := []map[string]any{
 		{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{
 			"name": "a", "annotations": map[string]any{"script": "line one\nline two\n  indented\n", "kubectl-fleet/context": "c1"},
@@ -244,7 +244,16 @@ func TestEncodeListMatchesWholeListEncoding(t *testing.T) {
 				if err := Encode(&want, whole, f); err != nil {
 					t.Fatal(err)
 				}
-				if err := EncodeList(&got, items, f); err != nil {
+				lw, err := NewListWriter(&got, f)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, it := range items {
+					if err := lw.Add(it); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := lw.Close(); err != nil {
 					t.Fatal(err)
 				}
 				if got.String() != want.String() {

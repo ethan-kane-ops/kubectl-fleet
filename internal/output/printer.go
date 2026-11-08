@@ -100,75 +100,88 @@ func Encode(w io.Writer, v any, f Format) error {
 	return fmt.Errorf("format %q is not json or yaml", f)
 }
 
-// EncodeList writes items (each a compact JSON object) as a v1 List in json
-// or yaml, the shape `kubectl get -o json` prints. Items are re-indented one
-// at a time, so the full list is never built as a second in-memory copy.
-func EncodeList(w io.Writer, items [][]byte, f Format) error {
-	bw := bufio.NewWriter(w)
-	var err error
-	switch f {
-	case FormatJSON:
-		err = writeJSONList(bw, items)
-	case FormatYAML:
-		err = writeYAMLList(bw, items)
-	default:
-		return fmt.Errorf("format %q is not json or yaml", f)
+// ListWriter streams a v1 List in json or yaml, the shape `kubectl get -o
+// json` prints, one compact-JSON item at a time, so a large result never has
+// to sit in memory as a whole.
+type ListWriter struct {
+	w      *bufio.Writer
+	format Format
+	n      int
+	buf    bytes.Buffer
+}
+
+const (
+	jsonListHead = "{\n  \"apiVersion\": \"v1\",\n  \"items\": ["
+	jsonListTail = "],\n  \"kind\": \"List\",\n  \"metadata\": {\n    \"resourceVersion\": \"\"\n  }\n}\n"
+	yamlListHead = "apiVersion: v1\nitems:"
+	yamlListTail = "kind: List\nmetadata:\n  resourceVersion: \"\"\n"
+)
+
+// NewListWriter returns a ListWriter for json or yaml.
+func NewListWriter(w io.Writer, f Format) (*ListWriter, error) {
+	if !f.Structured() {
+		return nil, fmt.Errorf("format %q is not json or yaml", f)
 	}
+	return &ListWriter{w: bufio.NewWriter(w), format: f}, nil
+}
+
+// Add writes one item, given as compact JSON.
+func (l *ListWriter) Add(item []byte) error {
+	if l.format == FormatYAML {
+		return l.addYAML(item)
+	}
+	if l.n == 0 {
+		_, _ = l.w.WriteString(jsonListHead + "\n")
+	} else {
+		_, _ = l.w.WriteString(",\n")
+	}
+	l.n++
+	l.buf.Reset()
+	if err := json.Indent(&l.buf, item, "    ", "  "); err != nil {
+		return fmt.Errorf("indent item: %w", err)
+	}
+	_, _ = l.w.WriteString("    ")
+	_, err := l.w.Write(l.buf.Bytes())
+	return err
+}
+
+func (l *ListWriter) addYAML(item []byte) error {
+	if l.n == 0 {
+		_, _ = l.w.WriteString(yamlListHead + "\n")
+	}
+	l.n++
+	y, err := yaml.JSONToYAML(item)
 	if err != nil {
-		return err
+		return fmt.Errorf("convert item to yaml: %w", err)
 	}
-	return bw.Flush()
-}
-
-func writeJSONList(w *bufio.Writer, items [][]byte) error {
-	if len(items) == 0 {
-		_, err := w.WriteString("{\n  \"apiVersion\": \"v1\",\n  \"items\": [],\n  \"kind\": \"List\",\n  \"metadata\": {\n    \"resourceVersion\": \"\"\n  }\n}\n")
-		return err
-	}
-	_, _ = w.WriteString("{\n  \"apiVersion\": \"v1\",\n  \"items\": [\n")
-	var buf bytes.Buffer
-	for i, item := range items {
-		buf.Reset()
-		if err := json.Indent(&buf, item, "    ", "  "); err != nil {
-			return fmt.Errorf("indent item: %w", err)
+	// A block sequence entry: "- " before the first line, two spaces before
+	// the rest. Uniform indentation keeps block scalars valid.
+	lines := strings.SplitAfter(strings.TrimSuffix(string(y), "\n"), "\n")
+	for i, line := range lines {
+		if i == 0 {
+			_, _ = l.w.WriteString("- ")
+		} else {
+			_, _ = l.w.WriteString("  ")
 		}
-		_, _ = w.WriteString("    ")
-		_, _ = w.Write(buf.Bytes())
-		if i < len(items)-1 {
-			_, _ = w.WriteString(",")
-		}
-		_, _ = w.WriteString("\n")
+		_, _ = l.w.WriteString(line)
 	}
-	_, err := w.WriteString("  ],\n  \"kind\": \"List\",\n  \"metadata\": {\n    \"resourceVersion\": \"\"\n  }\n}\n")
+	_, err = l.w.WriteString("\n")
 	return err
 }
 
-func writeYAMLList(w *bufio.Writer, items [][]byte) error {
-	if len(items) == 0 {
-		_, err := w.WriteString("apiVersion: v1\nitems: []\nkind: List\nmetadata:\n  resourceVersion: \"\"\n")
-		return err
+// Close ends the list and flushes it.
+func (l *ListWriter) Close() error {
+	switch {
+	case l.format == FormatJSON && l.n == 0:
+		_, _ = l.w.WriteString(jsonListHead + jsonListTail)
+	case l.format == FormatJSON:
+		_, _ = l.w.WriteString("\n  " + jsonListTail)
+	case l.n == 0:
+		_, _ = l.w.WriteString(yamlListHead + " []\n" + yamlListTail)
+	default:
+		_, _ = l.w.WriteString(yamlListTail)
 	}
-	_, _ = w.WriteString("apiVersion: v1\nitems:\n")
-	for _, item := range items {
-		y, err := yaml.JSONToYAML(item)
-		if err != nil {
-			return fmt.Errorf("convert item to yaml: %w", err)
-		}
-		// A block sequence entry: "- " before the first line, two spaces
-		// before the rest. Uniform indentation keeps block scalars valid.
-		lines := strings.SplitAfter(strings.TrimSuffix(string(y), "\n"), "\n")
-		for i, line := range lines {
-			if i == 0 {
-				_, _ = w.WriteString("- ")
-			} else {
-				_, _ = w.WriteString("  ")
-			}
-			_, _ = w.WriteString(line)
-		}
-		_, _ = w.WriteString("\n")
-	}
-	_, err := w.WriteString("kind: List\nmetadata:\n  resourceVersion: \"\"\n")
-	return err
+	return l.w.Flush()
 }
 
 func printTable(w io.Writer, t *Table, wide bool) error {

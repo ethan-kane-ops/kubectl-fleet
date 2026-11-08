@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -83,60 +84,79 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			}
 
 			req := getRequest{kind: kind, name: name, selector: labelSelector, allNamespaces: allNamespaces, format: f}
-			results := fleet.Run(cmd.Context(), refs, parallelism,
-				func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
-					return getOne(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), req)
-				})
+			fetch := func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
+				return getOne(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), req)
+			}
 
-			schema, namespaced, chosen := schemaForResults(kind, results)
-			tbl := buildTable(schema, namespaced)
-			tbl.NoHeaders = noHeaders
-			var encoded [][]byte
-			found := 0
-			for i := range results {
-				res := &results[i]
-				// Rows were projected with each context's own schema; a context
-				// that resolved the kind to another group/resource would not
-				// line up with the header, so it is reported instead.
-				if res.Err == nil && (res.Value.group != chosen.Group || res.Value.resource != chosen.Resource) {
-					res.Err = fmt.Errorf("%s resolves to %s here, not %s", kind,
-						schemaGR(res.Value.group, res.Value.resource), schemaGR(chosen.Group, chosen.Resource))
+			// json/yaml for a list is written as each context completes, in
+			// context order, so the fleet's objects never sit in memory at
+			// once. A named lookup stays buffered: it is small, and nothing is
+			// printed when no context has the object.
+			var lw *output.ListWriter
+			if f.Structured() && name == "" {
+				if lw, err = output.NewListWriter(cmd.OutOrStdout(), f); err != nil {
+					return err
+				}
+			}
+			var (
+				collected []fleet.ClusterResult[fetchedResource] // table, wide, name
+				encoded   [][]byte                               // buffered json/yaml
+				chosen    *schema.GroupResource
+				found     int
+				failed    int
+				writeErr  error
+			)
+			fleet.Stream(cmd.Context(), refs, parallelism, fetch, func(res fleet.ClusterResult[fetchedResource]) {
+				// Rows are projected with each context's own schema; a context
+				// that resolves the kind to another group/resource than the
+				// first successful one would not line up, so it is reported.
+				if res.Err == nil {
+					gr := schema.GroupResource{Group: res.Value.group, Resource: res.Value.resource}
+					if chosen == nil {
+						chosen = &gr
+					} else if gr != *chosen {
+						res.Err = fmt.Errorf("%s resolves to %s here, not %s", kind, gr, *chosen)
+					}
 				}
 				if res.Err != nil {
-					// -o name and json/yaml feed scripts; an "<error>" placeholder
-					// there would read as an object. The stderr warning reports it.
-					if f != output.FormatName && !f.Structured() {
-						appendErrorRow(tbl, res.Context, namespaced, schema, res.Err)
-					}
+					failed++
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
-					continue
+				} else {
+					found += res.Value.count
 				}
-				found += res.Value.count
-				encoded = append(encoded, res.Value.encoded...)
-				for j, row := range res.Value.rows {
-					var wide []string
-					if j < len(res.Value.wide) {
-						wide = res.Value.wide[j]
+				switch {
+				case !f.Structured():
+					collected = append(collected, res)
+				case res.Err != nil:
+				case lw != nil:
+					for _, item := range res.Value.encoded {
+						if writeErr == nil {
+							writeErr = lw.Add(item)
+						}
 					}
-					tbl.Append(append([]string{res.Context}, row...), wide)
+				default:
+					encoded = append(encoded, res.Value.encoded...)
 				}
-				res.Value = fetchedResource{} // release this context's rows early
+			})
+			if writeErr != nil {
+				return writeErr
 			}
-			if name != "" && found == 0 {
+
+			switch {
+			case name != "" && found == 0:
 				return fmt.Errorf("%s %q not found in any reachable context", kind, name)
-			}
-			if f.Structured() {
-				err = output.EncodeList(cmd.OutOrStdout(), encoded, f)
-			} else {
-				err = output.Print(cmd.OutOrStdout(), tbl, f)
+			case lw != nil:
+				err = lw.Close()
+			case f.Structured():
+				err = writeList(cmd.OutOrStdout(), encoded, f)
+			default:
+				err = output.Print(cmd.OutOrStdout(), buildGetTable(kind, collected, f, noHeaders), f)
 			}
 			if err != nil {
 				return err
 			}
-			if strict {
-				if n := fleet.CountErrors(results); n > 0 {
-					return fmt.Errorf("%d of %d contexts failed", n, len(results))
-				}
+			if strict && failed > 0 {
+				return fmt.Errorf("%d of %d contexts failed", failed, len(refs))
 			}
 			return nil
 		},
@@ -154,6 +174,45 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 // ContextAnnotation names the kubeconfig context an object came from in
 // `get -o json|yaml` output.
 const ContextAnnotation = "kubectl-fleet/context"
+
+// buildGetTable lays out the collected per-context rows under the header of
+// the first successful context's schema.
+func buildGetTable(kind string, results []fleet.ClusterResult[fetchedResource], f output.Format, noHeaders bool) *output.Table {
+	s, namespaced, _ := schemaForResults(kind, results)
+	tbl := buildTable(s, namespaced)
+	tbl.NoHeaders = noHeaders
+	for _, res := range results {
+		if res.Err != nil {
+			// -o name feeds scripts; an "<error>" placeholder there would read
+			// as an object name. The stderr warning reports it.
+			if f != output.FormatName {
+				appendErrorRow(tbl, res.Context, namespaced, s, res.Err)
+			}
+			continue
+		}
+		for j, row := range res.Value.rows {
+			var wide []string
+			if j < len(res.Value.wide) {
+				wide = res.Value.wide[j]
+			}
+			tbl.Append(append([]string{res.Context}, row...), wide)
+		}
+	}
+	return tbl
+}
+
+func writeList(w io.Writer, items [][]byte, f output.Format) error {
+	lw, err := output.NewListWriter(w, f)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := lw.Add(item); err != nil {
+			return err
+		}
+	}
+	return lw.Close()
+}
 
 // annotateContext records on u the context it came from, so objects with the
 // same name on different clusters stay distinguishable. u is owned by this
@@ -194,10 +253,6 @@ func schemaFor(gr schema.GroupResource) printers.Schema {
 		return s
 	}
 	return printers.Generic()
-}
-
-func schemaGR(group, resource string) string {
-	return schema.GroupResource{Group: group, Resource: resource}.String()
 }
 
 func buildTable(s printers.Schema, namespaced bool) *output.Table {
