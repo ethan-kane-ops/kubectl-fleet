@@ -187,11 +187,7 @@ func appendErrorRow(tbl *output.Table, ctx string, namespaced bool, s printers.S
 }
 
 func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, kind, name, ns string, allNS bool, selector string) (fetchedResource, error) {
-	restCfg, err := kubeconfig.RESTConfigFor(kubeFlags, r.Name)
-	if err != nil {
-		return fetchedResource{}, err
-	}
-	clients, err := k8s.New(restCfg)
+	clients, err := k8s.New(kubeconfig.ForContext(kubeFlags, r.Name))
 	if err != nil {
 		return fetchedResource{}, err
 	}

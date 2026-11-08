@@ -3,6 +3,7 @@ package kubeconfig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -123,5 +124,90 @@ func TestRESTConfigForMissingContext(t *testing.T) {
 	path := writeFixture(t)
 	if _, err := RESTConfigFor(flagsWith(path), "nope"); err == nil {
 		t.Fatal("expected error on missing context")
+	}
+}
+
+func TestNamespaceFor(t *testing.T) {
+	path := writeFixture(t)
+	cases := []struct {
+		name   string
+		ctx    string
+		flagNS string
+		want   string
+	}{
+		{"context namespace", "prod", "", "kube-system"},
+		{"no context namespace falls back to default", "stage", "", "default"},
+		{"flag overrides context", "prod", "team-a", "team-a"},
+		{"flag applies to context without namespace", "stage", "team-a", "team-a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := flagsWith(path)
+			f.Namespace = &tc.flagNS
+			got, err := NamespaceFor(f, tc.ctx)
+			if err != nil {
+				t.Fatalf("NamespaceFor: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRESTConfigForHonorsGlobalFlags(t *testing.T) {
+	path := writeFixture(t)
+	f := flagsWith(path)
+	as, token, timeout := "reader", "override-token", "7s"
+	groups := []string{"g1"}
+	f.Impersonate, f.BearerToken, f.Timeout, f.ImpersonateGroup = &as, &token, &timeout, &groups
+	rc, err := RESTConfigFor(f, "stage")
+	if err != nil {
+		t.Fatalf("RESTConfigFor: %v", err)
+	}
+	if rc.Impersonate.UserName != as || len(rc.Impersonate.Groups) != 1 || rc.Impersonate.Groups[0] != "g1" {
+		t.Errorf("impersonate=%+v", rc.Impersonate)
+	}
+	if rc.BearerToken != token {
+		t.Errorf("token=%q", rc.BearerToken)
+	}
+	if rc.Timeout.String() != "7s" {
+		t.Errorf("timeout=%v", rc.Timeout)
+	}
+	if rc.Host != "https://stage.example.test:6443" {
+		t.Errorf("host=%q", rc.Host)
+	}
+}
+
+func TestValidateFleetFlags(t *testing.T) {
+	set := func(apply func(f *genericclioptions.ConfigFlags)) *genericclioptions.ConfigFlags {
+		f := genericclioptions.NewConfigFlags(true)
+		apply(f)
+		return f
+	}
+	val := "x"
+	cases := []struct {
+		name    string
+		flags   *genericclioptions.ConfigFlags
+		wantErr string
+	}{
+		{"defaults pass", genericclioptions.NewConfigFlags(true), ""},
+		{"auth flags pass", set(func(f *genericclioptions.ConfigFlags) { f.Impersonate = &val; f.BearerToken = &val }), ""},
+		{"context rejected", set(func(f *genericclioptions.ConfigFlags) { f.Context = &val }), "--context"},
+		{"cluster rejected", set(func(f *genericclioptions.ConfigFlags) { f.ClusterName = &val }), "--cluster"},
+		{"server rejected", set(func(f *genericclioptions.ConfigFlags) { f.APIServer = &val }), "--server"},
+		{"tls server name rejected", set(func(f *genericclioptions.ConfigFlags) { f.TLSServerName = &val }), "--tls-server-name"},
+		{"user rejected", set(func(f *genericclioptions.ConfigFlags) { f.AuthInfoName = &val }), "--user"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateFleetFlags(tc.flags)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
