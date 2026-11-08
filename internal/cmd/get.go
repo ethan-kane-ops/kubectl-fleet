@@ -68,7 +68,11 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			tbl.NoHeaders = noHeaders
 			for _, res := range results {
 				if res.Err != nil {
-					appendErrorRow(tbl, res.Context, namespaced, schema, res.Err)
+					// -o name feeds scripts; a "<error>" placeholder there would
+					// read as an object name. The stderr warning still reports it.
+					if f != output.FormatName {
+						appendErrorRow(tbl, res.Context, namespaced, schema, res.Err)
+					}
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
 					continue
 				}

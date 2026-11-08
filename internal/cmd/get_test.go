@@ -94,3 +94,25 @@ func requested(cl *fakeCluster, path string) bool {
 	}
 	return false
 }
+
+func TestGetNameOutputOmitsFailedContexts(t *testing.T) {
+	ok := &fakeCluster{pods: []fakePod{{"default", "web"}}}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "down", server: "http://127.0.0.1:1"},
+		fakeContext{name: "up", server: ok.start(t)},
+	)
+	c := newGetCmd(newFlags(path))
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"pods", "-o", "name"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := stdout.String(); got != "up/default/web\n" {
+		t.Errorf("stdout=%q want only the reachable pod", got)
+	}
+	if !strings.Contains(stderr.String(), "warn: down:") {
+		t.Errorf("stderr should warn about the failed context: %q", stderr.String())
+	}
+}
