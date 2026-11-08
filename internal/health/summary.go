@@ -64,15 +64,23 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 	}
 	s.ServerVersion = v.GitVersion
 
-	nodes, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return s, fmt.Errorf("list nodes: %w", err)
-	}
-	s.NodesTotal = len(nodes.Items)
-	for i := range nodes.Items {
-		if isNodeReady(&nodes.Items[i]) {
+	// Nodes carry large status.images lists; page them like pods.
+	nodeLister := pager.New(func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+		return cs.CoreV1().Nodes().List(ctx, o)
+	})
+	err = nodeLister.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		n, ok := obj.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("unexpected list item %T", obj)
+		}
+		s.NodesTotal++
+		if isNodeReady(n) {
 			s.NodesReady++
 		}
+		return nil
+	})
+	if err != nil {
+		return s, fmt.Errorf("list nodes: %w", err)
 	}
 
 	noisy := map[string]int{}
@@ -82,10 +90,10 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 	}
 	// Pods are paged (500 per request) and folded into the counters one at a
 	// time, so a large cluster is never held in memory as one list.
-	lister := pager.New(func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+	podLister := pager.New(func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 		return cs.CoreV1().Pods("").List(ctx, o)
 	})
-	err = lister.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+	err = podLister.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
 		p, ok := obj.(*corev1.Pod)
 		if !ok {
 			return fmt.Errorf("unexpected list item %T", obj)

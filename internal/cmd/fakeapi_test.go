@@ -24,6 +24,7 @@ type fakeCluster struct {
 
 	mu       sync.Mutex
 	requests []string
+	accept   map[string]string // last Accept header per path
 }
 
 type fakePod struct{ namespace, name string }
@@ -41,9 +42,19 @@ func (f *fakeCluster) paths() []string {
 	return append([]string{}, f.requests...)
 }
 
+func (f *fakeCluster) acceptFor(path string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.accept[path]
+}
+
 func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.requests = append(f.requests, r.URL.Path+"?"+r.URL.RawQuery)
+	if f.accept == nil {
+		f.accept = map[string]string{}
+	}
+	f.accept[r.URL.Path] = r.Header.Get("Accept")
 	f.mu.Unlock()
 	if f.delay > 0 {
 		time.Sleep(f.delay)
