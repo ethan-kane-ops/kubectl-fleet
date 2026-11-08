@@ -1,6 +1,8 @@
 package k8s
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,5 +124,28 @@ func TestResolveGVRInvalidatesStaleCache(t *testing.T) {
 				t.Errorf("invalidated=%d want %d", c.invalidated, tc.wantInvalidated)
 			}
 		})
+	}
+}
+
+// partialDisco returns the fake's resources together with a discovery error,
+// as client-go does when one API group (e.g. a down aggregated API) fails.
+type partialDisco struct{ discovery.DiscoveryInterface }
+
+func (p partialDisco) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
+	g, r, _ := p.DiscoveryInterface.ServerGroupsAndResources()
+	return g, r, errors.New("metrics.k8s.io/v1beta1: the server is currently unable to handle the request")
+}
+
+func TestResolveGVRPartialDiscovery(t *testing.T) {
+	d := partialDisco{fakeDisco()}
+	if _, _, err := ResolveGVR(d, "pods"); err != nil {
+		t.Fatalf("a kind in a healthy group should resolve despite the partial failure: %v", err)
+	}
+	_, _, err := ResolveGVR(d, "podmetrics")
+	if err == nil || !strings.Contains(err.Error(), "metrics.k8s.io/v1beta1") {
+		t.Fatalf("want the discovery failure in the error, got %v", err)
+	}
+	if !errors.Is(err, errKindNotFound) {
+		t.Errorf("error should still wrap errKindNotFound: %v", err)
 	}
 }
