@@ -18,6 +18,8 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
 		o          fleetOptions
 		clientOnly bool
+		detailed   bool
+		perCluster bool
 	)
 	c := &cobra.Command{
 		Use:   "version",
@@ -34,6 +36,9 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			}
 			tbl.Append(clientRow())
 
+			if perCluster && !detailed {
+				return fmt.Errorf("--per-cluster needs --detailed")
+			}
 			if clientOnly {
 				return output.Print(cmd.OutOrStdout(), tbl, f)
 			}
@@ -47,6 +52,9 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				return err
 			}
 			refs := sel.refs
+			if detailed {
+				return versionDetailed(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), &o, kubeFlags, cfg, sel, f, perCluster)
+			}
 
 			results := fleet.Run(cmd.Context(), refs, o.parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (*version.Info, error) {
@@ -79,6 +87,8 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&clientOnly, "client", false, "show client version only, skip cluster probes")
+	c.Flags().BoolVar(&detailed, "detailed", false, "also report kubelet, node OS, kernel, container runtime, architecture and kube-system component versions; by default as a fleet-wide spread")
+	c.Flags().BoolVar(&perCluster, "per-cluster", false, "with --detailed, one row per context and component instead of the fleet-wide spread")
 	o.addFlags(c, defaultParallelism)
 	o.addErrorsFlag(c)
 	c.Flags().Lookup("strict").Usage = "exit non-zero if any context failed (ignored with --client)"

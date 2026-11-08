@@ -11,12 +11,14 @@ kubectl fleet version [flags]
 ```
       --client              show client version only, skip cluster probes
       --contexts string     regex selecting kubeconfig contexts by name (default: all)
+      --detailed            also report kubelet, node OS, kernel, container runtime, architecture and kube-system component versions; by default as a fleet-wide spread
       --errors              show each failed context: an <error> row with its ERROR text, and one warning line per failure (default: a one-line summary)
       --exclude string      regex of context names to leave out, applied after --contexts
   -h, --help                help for version
       --no-headers          suppress header row in table/wide output
   -o, --output string       output format: table|wide|json|yaml|name (default "table")
       --parallelism int     max contexts queried at once (0=unbounded) (default 32)
+      --per-cluster         with --detailed, one row per context and component instead of the fleet-wide spread
       --strict              exit non-zero if any context failed (ignored with --client)
       --where stringArray   filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
 ```
