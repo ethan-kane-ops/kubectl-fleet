@@ -142,12 +142,16 @@ prod-ap-1    payments     api-9b2a4e1d3-klmno           1h
 ```
 
 Failed clusters never abort the run. Per-context errors land in the table with
-`<error>` in the `NAME` column and surface a `warn:` line on stderr.
+`<error>` in the `NAME` column (left out of `-o name`) and surface a `warn:`
+line on stderr. Without `-n` or `-A`, each context is queried in its own
+namespace, falling back to `default`. `get <kind> <name>` skips contexts that
+don't have the object and errors only when none of them do.
 
 ### `kubectl fleet status`
 
 Per-cluster health snapshot: node readiness, pod counts, server version, and
-the three noisiest namespaces by non-Running pods.
+the three noisiest namespaces by unhealthy pods (Pending, Failed, Unknown or
+crashlooping; completed Job pods don't count).
 
 ```bash
 kubectl fleet status
@@ -174,12 +178,16 @@ scripting.
 ## Flags inherited from kubectl
 
 `kubectl-fleet` plumbs `genericclioptions.ConfigFlags`, so the standard
-kubeconfig flags work uniformly:
+kubeconfig flags apply to every context:
 
 - `--kubeconfig <path>`: alternate kubeconfig file
 - `--context <name>`: restrict to a single context (overrides `--contexts`)
 - `--namespace <ns>` / `-n <ns>`: namespace scope for `get`
-- `--user`, `--cluster`, `--token`, `--server`, etc.
+- `--as`, `--as-group`, `--token`, `--request-timeout`,
+  `--insecure-skip-tls-verify`, `--certificate-authority`, `--cache-dir`, etc.
+
+`--cluster`, `--user`, `--server` and `--tls-server-name` are rejected: across
+a fleet they would point every context at the same target.
 
 `KUBECONFIG` env var is honoured (colon-separated multi-file lists are merged).
 

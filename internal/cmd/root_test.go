@@ -13,7 +13,7 @@ func TestRootRejectsSingleClusterFlags(t *testing.T) {
 		want string
 	}{
 		{[]string{"get", "pods", "--server", "https://x"}, "--server"},
-		{[]string{"status", "--context", "prod"}, "--context"},
+		{[]string{"status", "--user", "u"}, "--user"},
 		{[]string{"contexts", "--cluster", "c-prod"}, "--cluster"},
 	}
 	for _, tc := range cases {

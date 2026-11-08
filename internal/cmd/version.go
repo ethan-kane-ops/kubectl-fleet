@@ -47,7 +47,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			refs, err := kubeconfig.Contexts(cfg, filter)
+			refs, err := kubeconfig.Select(kubeFlags, cfg, filter)
 			if err != nil {
 				return err
 			}

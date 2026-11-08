@@ -193,7 +193,7 @@ func TestValidateFleetFlags(t *testing.T) {
 	}{
 		{"defaults pass", genericclioptions.NewConfigFlags(true), ""},
 		{"auth flags pass", set(func(f *genericclioptions.ConfigFlags) { f.Impersonate = &val; f.BearerToken = &val }), ""},
-		{"context rejected", set(func(f *genericclioptions.ConfigFlags) { f.Context = &val }), "--context"},
+		{"context passes", set(func(f *genericclioptions.ConfigFlags) { f.Context = &val }), ""},
 		{"cluster rejected", set(func(f *genericclioptions.ConfigFlags) { f.ClusterName = &val }), "--cluster"},
 		{"server rejected", set(func(f *genericclioptions.ConfigFlags) { f.APIServer = &val }), "--server"},
 		{"tls server name rejected", set(func(f *genericclioptions.ConfigFlags) { f.TLSServerName = &val }), "--tls-server-name"},
@@ -207,6 +207,41 @@ func TestValidateFleetFlags(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
 				t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestSelect(t *testing.T) {
+	cfg, err := Load(flagsWith(writeFixture(t)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cases := []struct {
+		name    string
+		context string
+		filter  string
+		want    []string
+		wantErr bool
+	}{
+		{"no --context uses the filter", "", "^(prod|dev)$", []string{"dev", "prod"}, false},
+		{"--context overrides the filter", "stage", "^prod$", []string{"stage"}, false},
+		{"unknown --context errors", "nope", "", nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := genericclioptions.NewConfigFlags(true)
+			f.Context = &tc.context
+			refs, err := Select(f, cfg, tc.filter)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err=%v wantErr=%v", err, tc.wantErr)
+			}
+			var got []string
+			for _, r := range refs {
+				got = append(got, r.Name)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("got %v want %v", got, tc.want)
 			}
 		})
 	}
