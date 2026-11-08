@@ -30,8 +30,9 @@ type fakeCluster struct {
 	extraColumn string
 	// gitVersion is what /version reports (default v1.31.0); nodes is the
 	// node count, served as Ready nodes named node-0..node-N-1.
-	gitVersion string
-	nodes      int
+	gitVersion    string
+	nodes         int
+	notReadyNodes int // the last notReadyNodes of nodes report Ready=False
 
 	mu       sync.Mutex
 	requests []string
@@ -161,8 +162,12 @@ func (f *fakeCluster) listNodes(w http.ResponseWriter, r *http.Request) {
 			items = append(items, map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": meta})
 			continue
 		}
+		ready := "True"
+		if i >= f.nodes-f.notReadyNodes {
+			ready = "False"
+		}
 		items = append(items, map[string]any{"kind": "Node", "apiVersion": "v1", "metadata": meta,
-			"status": map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": "True"}}}})
+			"status": map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": ready}}}})
 	}
 	if metaOnly {
 		writeJSON(w, map[string]any{"kind": "PartialObjectMetadataList", "apiVersion": "meta.k8s.io/v1", "metadata": map[string]any{}, "items": items})

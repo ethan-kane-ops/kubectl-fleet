@@ -214,3 +214,26 @@ func compare(c int, op string) bool {
 	}
 	return false
 }
+
+// CompareServerVersions orders two server gitVersions numerically,
+// ignoring vendor suffixes: -1, 0 or 1. An unparsable version sorts below
+// any parsable one.
+func CompareServerVersions(a, b string) int {
+	va, oka := parseVersion(serverVersion(a))
+	vb, okb := parseVersion(serverVersion(b))
+	switch {
+	case !oka && !okb:
+		return 0
+	case !oka:
+		return -1
+	case !okb:
+		return 1
+	}
+	for len(va) < 3 {
+		va = append(va, 0)
+	}
+	for len(vb) < 3 {
+		vb = append(vb, 0)
+	}
+	return cmpVersion(va, vb)
+}

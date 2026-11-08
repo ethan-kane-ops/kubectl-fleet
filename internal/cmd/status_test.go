@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -126,5 +127,76 @@ func TestStatusRequestsProtobufAndPagesNodes(t *testing.T) {
 	}
 	if !requested(cl, "/api/v1/nodes") || !strings.Contains(strings.Join(cl.paths(), " "), "/api/v1/nodes?limit=500") {
 		t.Errorf("node list not paged: %v", cl.paths())
+	}
+}
+
+func TestStatusProblemsSortTop(t *testing.T) {
+	pods := func(n int) []fakePod {
+		var out []fakePod
+		for i := range n {
+			out = append(out, fakePod{"default", fmt.Sprintf("p%d", i)})
+		}
+		return out
+	}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "big", server: (&fakeCluster{nodes: 5, pods: pods(3), gitVersion: "v1.30.2"}).start(t)},
+		fakeContext{name: "sick", server: (&fakeCluster{nodes: 3, notReadyNodes: 1, pods: pods(2), gitVersion: "v1.31.1"}).start(t)},
+		fakeContext{name: "small", server: (&fakeCluster{nodes: 2, pods: pods(1), gitVersion: "v1.29.9"}).start(t)},
+	)
+	cases := []struct {
+		name    string
+		args    []string
+		want    []string // contexts in output order
+		wantErr string
+	}{
+		{"default order", nil, []string{"big", "sick", "small"}, ""},
+		{"problems only", []string{"--problems"}, []string{"sick"}, ""},
+		{"largest by pods, top 2", []string{"--sort-by", "pods", "--top", "2"}, []string{"big", "sick"}, ""},
+		{"largest by nodes", []string{"--sort-by", "nodes"}, []string{"big", "sick", "small"}, ""},
+		{"newest version first", []string{"--sort-by", "version"}, []string{"sick", "big", "small"}, ""},
+		{"context ascending", []string{"--sort-by", "context", "--top", "1"}, []string{"big"}, ""},
+		{"unknown sort key", []string{"--sort-by", "colour"}, nil, "--sort-by must be one of: nodes, pods, version, context"},
+		{"negative top", []string{"--top", "-1"}, nil, "--top must be 0 or more"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, _, err := runRoot(t, append(append([]string{"status", "--no-headers"}, tc.args...), "--kubeconfig", path, "--cache-dir", t.TempDir())...)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want error %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+				if f := strings.Fields(line); len(f) > 0 {
+					got = append(got, f[0])
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("contexts %v want %v\n%s", got, tc.want, out)
+			}
+		})
+	}
+}
+
+func TestStatusTopAppliesToJSON(t *testing.T) {
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "a", server: (&fakeCluster{nodes: 1}).start(t)},
+		fakeContext{name: "b", server: (&fakeCluster{nodes: 4}).start(t)},
+	)
+	out, _, err := runRoot(t, "status", "--sort-by", "nodes", "--top", "1", "-o", "json", "--kubeconfig", path, "--cache-dir", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []map[string]any
+	if err := json.Unmarshal([]byte(out), &records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0]["context"] != "b" {
+		t.Errorf("want only b, got %v", records)
 	}
 }
