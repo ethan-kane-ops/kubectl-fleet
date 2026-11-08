@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -98,4 +99,58 @@ func TestRunEmpty(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("expected empty, got %d", len(got))
 	}
+}
+
+func TestStream(t *testing.T) {
+	// Later contexts finish first; emit must still see refs order, and each
+	// result as soon as its predecessors are done.
+	delays := map[string]time.Duration{"a": 60 * time.Millisecond, "b": 20 * time.Millisecond, "c": 0, "d": 40 * time.Millisecond}
+	cases := []struct {
+		name        string
+		parallelism int
+	}{{"bounded", 2}, {"unbounded", 0}, {"serial", 1}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var inFlight, maxInFlight atomic.Int32
+			var emitted []string
+			failed := 0
+			Stream(context.Background(), refs("a", "b", "c", "d"), tc.parallelism,
+				func(_ context.Context, r kubeconfig.ContextRef) (string, error) {
+					n := inFlight.Add(1)
+					defer inFlight.Add(-1)
+					for {
+						m := maxInFlight.Load()
+						if n <= m || maxInFlight.CompareAndSwap(m, n) {
+							break
+						}
+					}
+					time.Sleep(delays[r.Name])
+					if r.Name == "c" {
+						return "", errors.New("boom")
+					}
+					return r.Name + "!", nil
+				},
+				func(r ClusterResult[string]) {
+					emitted = append(emitted, r.Context+"="+r.Value)
+					if r.Err != nil {
+						failed++
+					}
+				})
+			if got := strings.Join(emitted, ","); got != "a=a!,b=b!,c=,d=d!" {
+				t.Errorf("emitted %s", got)
+			}
+			if failed != 1 {
+				t.Errorf("failed=%d want 1", failed)
+			}
+			if tc.parallelism > 0 && int(maxInFlight.Load()) > tc.parallelism {
+				t.Errorf("max in flight %d exceeds %d", maxInFlight.Load(), tc.parallelism)
+			}
+		})
+	}
+}
+
+func TestStreamEmpty(t *testing.T) {
+	Stream(context.Background(), nil, 4,
+		func(context.Context, kubeconfig.ContextRef) (int, error) { return 0, nil },
+		func(ClusterResult[int]) { t.Error("emit called for no contexts") })
 }
