@@ -15,7 +15,8 @@ import (
 )
 
 // fakeCluster is a minimal API server: discovery for core/v1 pods and nodes,
-// /version, and pod list/get. Pod lists page by the request's limit so the
+// /version, and pod list/get. Pod lists honour a metadata.name field
+// selector. Pod lists page by the request's limit so the
 // pager path is exercised. Every request path is recorded.
 type fakeCluster struct {
 	pods  []fakePod
@@ -85,8 +86,9 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string) {
 	var match []fakePod
+	wantName := strings.TrimPrefix(r.URL.Query().Get("fieldSelector"), "metadata.name=")
 	for _, p := range f.pods {
-		if ns == "" || p.namespace == ns {
+		if (ns == "" || p.namespace == ns) && (wantName == "" || p.name == wantName) {
 			match = append(match, p)
 		}
 	}

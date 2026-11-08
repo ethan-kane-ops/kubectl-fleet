@@ -123,7 +123,7 @@ func TestGetNameOutputOmitsFailedContexts(t *testing.T) {
 
 func TestGetNamedObjectAcrossFleet(t *testing.T) {
 	has := &fakeCluster{pods: []fakePod{{"default", "web"}}}
-	lacks := &fakeCluster{}
+	lacks := &fakeCluster{pods: []fakePod{{"team-b", "web"}, {"team-b", "other"}}}
 	path := writeFakeKubeconfig(t,
 		fakeContext{name: "has", server: has.start(t)},
 		fakeContext{name: "lacks", server: lacks.start(t)},
@@ -136,6 +136,8 @@ func TestGetNamedObjectAcrossFleet(t *testing.T) {
 	}{
 		{"absent on some contexts is not a failure", []string{"pods", "web", "--strict", "-o", "name"}, "has/default/web\n", ""},
 		{"absent everywhere is an error", []string{"pods", "nope"}, "", `pods "nope" not found in any reachable context`},
+		{"-A finds the name in any namespace", []string{"pods", "web", "-A", "-o", "name"}, "has/default/web\nlacks/team-b/web\n", ""},
+		{"-A with the name nowhere is an error", []string{"pods", "nope", "-A"}, "", `pods "nope" not found in any reachable context`},
 		{"name with selector is rejected", []string{"pods", "web", "-l", "app=web"}, "", "cannot be combined with --selector"},
 	}
 	for _, tc := range cases {
