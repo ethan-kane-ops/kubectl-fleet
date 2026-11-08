@@ -2,6 +2,8 @@
 package output
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,6 +98,77 @@ func Encode(w io.Writer, v any, f Format) error {
 		return printYAML(w, v)
 	}
 	return fmt.Errorf("format %q is not json or yaml", f)
+}
+
+// EncodeList writes items (each a compact JSON object) as a v1 List in json
+// or yaml, the shape `kubectl get -o json` prints. Items are re-indented one
+// at a time, so the full list is never built as a second in-memory copy.
+func EncodeList(w io.Writer, items [][]byte, f Format) error {
+	bw := bufio.NewWriter(w)
+	var err error
+	switch f {
+	case FormatJSON:
+		err = writeJSONList(bw, items)
+	case FormatYAML:
+		err = writeYAMLList(bw, items)
+	default:
+		return fmt.Errorf("format %q is not json or yaml", f)
+	}
+	if err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+func writeJSONList(w *bufio.Writer, items [][]byte) error {
+	if len(items) == 0 {
+		_, err := w.WriteString("{\n  \"apiVersion\": \"v1\",\n  \"items\": [],\n  \"kind\": \"List\",\n  \"metadata\": {\n    \"resourceVersion\": \"\"\n  }\n}\n")
+		return err
+	}
+	_, _ = w.WriteString("{\n  \"apiVersion\": \"v1\",\n  \"items\": [\n")
+	var buf bytes.Buffer
+	for i, item := range items {
+		buf.Reset()
+		if err := json.Indent(&buf, item, "    ", "  "); err != nil {
+			return fmt.Errorf("indent item: %w", err)
+		}
+		_, _ = w.WriteString("    ")
+		_, _ = w.Write(buf.Bytes())
+		if i < len(items)-1 {
+			_, _ = w.WriteString(",")
+		}
+		_, _ = w.WriteString("\n")
+	}
+	_, err := w.WriteString("  ],\n  \"kind\": \"List\",\n  \"metadata\": {\n    \"resourceVersion\": \"\"\n  }\n}\n")
+	return err
+}
+
+func writeYAMLList(w *bufio.Writer, items [][]byte) error {
+	if len(items) == 0 {
+		_, err := w.WriteString("apiVersion: v1\nitems: []\nkind: List\nmetadata:\n  resourceVersion: \"\"\n")
+		return err
+	}
+	_, _ = w.WriteString("apiVersion: v1\nitems:\n")
+	for _, item := range items {
+		y, err := yaml.JSONToYAML(item)
+		if err != nil {
+			return fmt.Errorf("convert item to yaml: %w", err)
+		}
+		// A block sequence entry: "- " before the first line, two spaces
+		// before the rest. Uniform indentation keeps block scalars valid.
+		lines := strings.SplitAfter(strings.TrimSuffix(string(y), "\n"), "\n")
+		for i, line := range lines {
+			if i == 0 {
+				_, _ = w.WriteString("- ")
+			} else {
+				_, _ = w.WriteString("  ")
+			}
+			_, _ = w.WriteString(line)
+		}
+		_, _ = w.WriteString("\n")
+	}
+	_, err := w.WriteString("kind: List\nmetadata:\n  resourceVersion: \"\"\n")
+	return err
 }
 
 func printTable(w io.Writer, t *Table, wide bool) error {

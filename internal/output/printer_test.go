@@ -2,8 +2,12 @@ package output
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func sampleTable() *Table {
@@ -209,5 +213,44 @@ func TestEncode(t *testing.T) {
 				t.Errorf("got %q want %q", buf.String(), tc.want)
 			}
 		})
+	}
+}
+
+// TestEncodeListMatchesWholeListEncoding pins EncodeList's streamed output
+// to what encoding the whole List at once produces.
+func TestEncodeListMatchesWholeListEncoding(t *testing.T) {
+	objs := []map[string]any{
+		{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{
+			"name": "a", "annotations": map[string]any{"script": "line one\nline two\n  indented\n", "kubectl-fleet/context": "c1"},
+		}, "spec": map[string]any{"containers": []any{map[string]any{"name": "x", "args": []any{"-v", "2"}}}, "tolerations": []any{}}},
+		{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "b", "labels": map[string]any{}}, "status": map[string]any{"phase": "Running"}},
+	}
+	for _, n := range []int{0, 1, 2} {
+		var items [][]byte
+		whole := &unstructured.UnstructuredList{Object: map[string]any{
+			"apiVersion": "v1", "kind": "List", "metadata": map[string]any{"resourceVersion": ""},
+		}}
+		for _, o := range objs[:n] {
+			b, err := json.Marshal(o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items = append(items, b)
+			whole.Items = append(whole.Items, unstructured.Unstructured{Object: o})
+		}
+		for _, f := range []Format{FormatJSON, FormatYAML} {
+			t.Run(fmt.Sprintf("%s/%d items", f, n), func(t *testing.T) {
+				var want, got bytes.Buffer
+				if err := Encode(&want, whole, f); err != nil {
+					t.Fatal(err)
+				}
+				if err := EncodeList(&got, items, f); err != nil {
+					t.Fatal(err)
+				}
+				if got.String() != want.String() {
+					t.Errorf("mismatch\n--- got\n%s\n--- want\n%s", got.String(), want.String())
+				}
+			})
+		}
 	}
 }

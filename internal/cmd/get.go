@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -21,11 +22,25 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/printers"
 )
 
+// fetchedResource is one context's result, already projected into the
+// output format while paging so no context holds its objects in memory:
+// table rows (NAMESPACE, when namespaced, then the schema's columns) or
+// compact JSON for -o json|yaml.
 type fetchedResource struct {
-	items      []unstructured.Unstructured
 	namespaced bool
 	resource   string
 	group      string
+	count      int
+	rows       [][]string
+	wide       [][]string
+	encoded    [][]byte
+}
+
+// getRequest is what `get` asks of every context.
+type getRequest struct {
+	kind, name, selector string
+	allNamespaces        bool
+	format               output.Format
 }
 
 func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
@@ -67,17 +82,26 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				return fmt.Errorf("no matching contexts")
 			}
 
+			req := getRequest{kind: kind, name: name, selector: labelSelector, allNamespaces: allNamespaces, format: f}
 			results := fleet.Run(cmd.Context(), refs, parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
-					return getOne(ctx, kubeFlags, r, kind, name, allNamespaces, labelSelector)
+					return getOne(ctx, kubeFlags, r, req)
 				})
 
-			schema, namespaced := schemaForResults(kind, results)
+			schema, namespaced, chosen := schemaForResults(kind, results)
 			tbl := buildTable(schema, namespaced)
 			tbl.NoHeaders = noHeaders
-			list := newFleetList()
+			var encoded [][]byte
 			found := 0
-			for _, res := range results {
+			for i := range results {
+				res := &results[i]
+				// Rows were projected with each context's own schema; a context
+				// that resolved the kind to another group/resource would not
+				// line up with the header, so it is reported instead.
+				if res.Err == nil && (res.Value.group != chosen.Group || res.Value.resource != chosen.Resource) {
+					res.Err = fmt.Errorf("%s resolves to %s here, not %s", kind,
+						schemaGR(res.Value.group, res.Value.resource), schemaGR(chosen.Group, chosen.Resource))
+				}
 				if res.Err != nil {
 					// -o name and json/yaml feed scripts; an "<error>" placeholder
 					// there would read as an object. The stderr warning reports it.
@@ -87,26 +111,22 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
 					continue
 				}
-				found += len(res.Value.items)
-				for i := range res.Value.items {
-					u := &res.Value.items[i]
-					cols, wide := schema.Row(u)
-					prefix := []string{res.Context}
-					if namespaced {
-						prefix = append(prefix, u.GetNamespace())
+				found += res.Value.count
+				encoded = append(encoded, res.Value.encoded...)
+				for j, row := range res.Value.rows {
+					var wide []string
+					if j < len(res.Value.wide) {
+						wide = res.Value.wide[j]
 					}
-					tbl.Append(append(prefix, cols...), append(wide, ""))
-					if f.Structured() {
-						annotateContext(u, res.Context)
-						list.Items = append(list.Items, *u)
-					}
+					tbl.Append(append([]string{res.Context}, row...), wide)
 				}
+				res.Value = fetchedResource{} // release this context's rows early
 			}
 			if name != "" && found == 0 {
 				return fmt.Errorf("%s %q not found in any reachable context", kind, name)
 			}
 			if f.Structured() {
-				err = output.Encode(cmd.OutOrStdout(), list, f)
+				err = output.EncodeList(cmd.OutOrStdout(), encoded, f)
 			} else {
 				err = output.Print(cmd.OutOrStdout(), tbl, f)
 			}
@@ -135,16 +155,6 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 // `get -o json|yaml` output.
 const ContextAnnotation = "kubectl-fleet/context"
 
-// newFleetList returns an empty v1 List, the shape kubectl prints for
-// `get -o json` over several objects.
-func newFleetList() *unstructured.UnstructuredList {
-	return &unstructured.UnstructuredList{Object: map[string]any{
-		"apiVersion": "v1",
-		"kind":       "List",
-		"metadata":   map[string]any{"resourceVersion": ""},
-	}}
-}
-
 // annotateContext records on u the context it came from, so objects with the
 // same name on different clusters stay distinguishable. u is owned by this
 // run, so it is annotated in place rather than copied.
@@ -158,16 +168,14 @@ func annotateContext(u *unstructured.Unstructured, ctxName string) {
 }
 
 // schemaForResults picks a per-kind schema for the group and resource the
-// first successful cluster resolved, else printers.Generic. When no cluster
-// succeeded it falls back to the user's input (alias or resource.group) and
-// the schema's own Namespaced declaration.
-func schemaForResults(kind string, results []fleet.ClusterResult[fetchedResource]) (printers.Schema, bool) {
+// first successful cluster resolved, else printers.Generic, and returns that
+// group/resource. When no cluster succeeded it falls back to the user's input
+// (alias or resource.group) and the schema's own Namespaced declaration.
+func schemaForResults(kind string, results []fleet.ClusterResult[fetchedResource]) (printers.Schema, bool, schema.GroupResource) {
 	for _, r := range results {
 		if r.Err == nil && r.Value.resource != "" {
-			if s, ok := printers.ForGroupResource(r.Value.group, r.Value.resource); ok {
-				return s, r.Value.namespaced
-			}
-			return printers.Generic(), r.Value.namespaced
+			gr := schema.GroupResource{Group: r.Value.group, Resource: r.Value.resource}
+			return schemaFor(gr), r.Value.namespaced, gr
 		}
 	}
 	s, ok := printers.For(kind)
@@ -177,7 +185,19 @@ func schemaForResults(kind string, results []fleet.ClusterResult[fetchedResource
 	if !ok {
 		s = printers.Generic()
 	}
-	return s, s.Namespaced
+	return s, s.Namespaced, schema.GroupResource{}
+}
+
+// schemaFor returns the per-kind schema registered for gr, else Generic.
+func schemaFor(gr schema.GroupResource) printers.Schema {
+	if s, ok := printers.ForGroupResource(gr.Group, gr.Resource); ok {
+		return s
+	}
+	return printers.Generic()
+}
+
+func schemaGR(group, resource string) string {
+	return schema.GroupResource{Group: group, Resource: resource}.String()
 }
 
 func buildTable(s printers.Schema, namespaced bool) *output.Table {
@@ -210,44 +230,67 @@ func appendErrorRow(tbl *output.Table, ctx string, namespaced bool, s printers.S
 	tbl.Append(row, wide)
 }
 
-// getOne fetches kind (and optionally name) from one context. Without -A the
+// getOne fetches req.kind (and optionally req.name) from one context and
+// projects each object into req.format as it arrives. Without -A the
 // namespace is resolved per context: --namespace, else that context's own
 // namespace, else "default".
-func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, kind, name string, allNS bool, selector string) (fetchedResource, error) {
+func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kubeconfig.ContextRef, req getRequest) (fetchedResource, error) {
 	cf := kubeconfig.ForContext(kubeFlags, r.Name)
 	clients, err := k8s.New(cf)
 	if err != nil {
 		return fetchedResource{}, err
 	}
-	gvr, namespaced, err := k8s.ResolveGVR(clients.Discovery, kind)
+	gvr, namespaced, err := k8s.ResolveGVR(clients.Discovery, req.kind)
 	if err != nil {
 		return fetchedResource{}, err
 	}
 	out := fetchedResource{namespaced: namespaced, resource: gvr.Resource, group: gvr.Group}
 	ns := ""
-	if namespaced && !allNS {
+	if namespaced && !req.allNamespaces {
 		if ns, err = kubeconfig.Namespace(cf); err != nil {
 			return out, err
 		}
 	}
 
+	s := schemaFor(gvr.GroupResource())
+	add := func(u *unstructured.Unstructured) error {
+		out.count++
+		if req.format.Structured() {
+			annotateContext(u, r.Name)
+			b, err := json.Marshal(u.Object)
+			if err != nil {
+				return fmt.Errorf("encode %s/%s: %w", gvr.Resource, u.GetName(), err)
+			}
+			out.encoded = append(out.encoded, b)
+			return nil
+		}
+		cols, wide := s.Row(u)
+		if namespaced {
+			cols = append([]string{u.GetNamespace()}, cols...)
+		}
+		out.rows = append(out.rows, cols)
+		if req.format == output.FormatWide {
+			out.wide = append(out.wide, append(wide, ""))
+		}
+		return nil
+	}
+
 	// A namespaced name with -A has no single object URL, so it becomes a
 	// list across all namespaces filtered by name: it finds every namespace,
 	// on every cluster, that holds an object of that name.
-	listOpts := metav1.ListOptions{LabelSelector: selector}
-	if name != "" && namespaced && allNS {
-		listOpts.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
-	} else if name != "" {
-		u, err := clients.Dynamic.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	listOpts := metav1.ListOptions{LabelSelector: req.selector}
+	if req.name != "" && namespaced && req.allNamespaces {
+		listOpts.FieldSelector = fields.OneTermEqualSelector("metadata.name", req.name).String()
+	} else if req.name != "" {
+		u, err := clients.Dynamic.Resource(gvr).Namespace(ns).Get(ctx, req.name, metav1.GetOptions{})
 		// Absent from some clusters is normal for a fleet, not a failure.
 		if apierrors.IsNotFound(err) {
 			return out, nil
 		}
 		if err != nil {
-			return out, fmt.Errorf("get %s/%s: %w", gvr.Resource, name, err)
+			return out, fmt.Errorf("get %s/%s: %w", gvr.Resource, req.name, err)
 		}
-		out.items = []unstructured.Unstructured{*u}
-		return out, nil
+		return out, add(u)
 	}
 	// Page through the list as kubectl does (500 per request) so large
 	// clusters are not asked to serialise every object in one response.
@@ -259,8 +302,7 @@ func getOne(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, r kub
 		if !ok {
 			return fmt.Errorf("unexpected list item %T", obj)
 		}
-		out.items = append(out.items, *u)
-		return nil
+		return add(u)
 	})
 	if err != nil {
 		return out, fmt.Errorf("list %s: %w", gvr.Resource, err)
