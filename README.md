@@ -200,11 +200,15 @@ kubeconfig flags apply to every context:
 - `--kubeconfig <path>`: alternate kubeconfig file
 - `--context <name>`: restrict to a single context (overrides `--contexts`)
 - `--namespace <ns>` / `-n <ns>`: namespace scope for `get`
-- `--as`, `--as-group`, `--token`, `--request-timeout`,
-  `--insecure-skip-tls-verify`, `--certificate-authority`, `--cache-dir`, etc.
+- `--as`, `--as-group`, `--request-timeout`, `--insecure-skip-tls-verify`,
+  `--certificate-authority`, `--cache-dir`, etc.
 
 `--cluster`, `--user`, `--server` and `--tls-server-name` are rejected: across
-a fleet they would point every context at the same target.
+a fleet they would point every context at the same target. `--token` needs
+`--context`, so one cluster's bearer token is never sent to the others.
+
+API server warnings, such as deprecated API versions, print to stderr once
+per context as `warn: <context>: <message>`.
 
 `KUBECONFIG` env var is honoured (colon-separated multi-file lists are merged).
 

@@ -193,7 +193,10 @@ func TestValidateFleetFlags(t *testing.T) {
 		wantErr string
 	}{
 		{"defaults pass", genericclioptions.NewConfigFlags(true), ""},
-		{"auth flags pass", set(func(f *genericclioptions.ConfigFlags) { f.Impersonate = &val; f.BearerToken = &val }), ""},
+		{"impersonation passes", set(func(f *genericclioptions.ConfigFlags) { f.Impersonate = &val }), ""},
+		{"token without --context rejected", set(func(f *genericclioptions.ConfigFlags) { f.BearerToken = &val }), "--token requires --context"},
+		{"password without --context rejected", set(func(f *genericclioptions.ConfigFlags) { f.Password = &val }), "--password requires --context"},
+		{"token with --context passes", set(func(f *genericclioptions.ConfigFlags) { f.BearerToken = &val; f.Context = &val }), ""},
 		{"context passes", set(func(f *genericclioptions.ConfigFlags) { f.Context = &val }), ""},
 		{"cluster rejected", set(func(f *genericclioptions.ConfigFlags) { f.ClusterName = &val }), "--cluster"},
 		{"server rejected", set(func(f *genericclioptions.ConfigFlags) { f.APIServer = &val }), "--server"},
