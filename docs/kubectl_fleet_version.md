@@ -14,7 +14,7 @@ kubectl fleet version [flags]
   -h, --help              help for version
       --no-headers        suppress header row in table/wide output
   -o, --output string     output format: table|wide|json|yaml|name (default "table")
-      --parallelism int   max parallel cluster calls (0=unbounded) (default 8)
+      --parallelism int   max parallel cluster calls (0=unbounded) (default 32)
       --strict            exit non-zero if any context failed (ignored with --client)
 ```
 

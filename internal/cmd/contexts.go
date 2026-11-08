@@ -82,7 +82,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().StringVar(&filter, "filter", "", "regex applied to context names")
 	c.Flags().BoolVar(&probe, "check", false, "probe each context's /version endpoint")
 	c.Flags().DurationVar(&timeout, "timeout", 5*time.Second, "per-context probe timeout")
-	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel probes (0=unbounded)")
+	c.Flags().IntVar(&parallelism, "parallelism", defaultParallelism, "max parallel probes (0=unbounded)")
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any probed context is unreachable (requires --check)")

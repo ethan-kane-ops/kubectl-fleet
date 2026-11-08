@@ -8,6 +8,15 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 )
 
+// Default --parallelism. Contexts are independent API servers, so the limit
+// guards local resources, not any one server. status, version and contexts
+// keep little per context in flight; get decodes a page of up to 500 objects
+// per in-flight context (tens of MB on large clusters), so it runs fewer.
+const (
+	defaultParallelism    = 32
+	defaultGetParallelism = 16
+)
+
 // NewRootCmd returns the root cobra command for kubectl-fleet.
 //
 // Binary is invoked by kubectl as `kubectl fleet <subcommand>` once

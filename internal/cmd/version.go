@@ -87,7 +87,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	}
 	c.Flags().BoolVar(&clientOnly, "client", false, "show client version only, skip cluster probes")
 	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", 8, "max parallel cluster calls (0=unbounded)")
+	c.Flags().IntVar(&parallelism, "parallelism", defaultParallelism, "max parallel cluster calls (0=unbounded)")
 	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
 	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed (ignored with --client)")
