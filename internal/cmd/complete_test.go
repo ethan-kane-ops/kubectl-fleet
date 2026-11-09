@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,4 +116,24 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func TestCompleteNamesMostlyDeadFleet(t *testing.T) {
+	slow := &fakeCluster{delay: 10 * time.Second}
+	fast := &fakeCluster{pods: []fakePod{{"default", "web"}}}
+	slowURL := slow.start(t)
+	var ctxs []fakeContext
+	for i := range 300 {
+		ctxs = append(ctxs, fakeContext{name: fmt.Sprintf("hung-%03d", i), server: slowURL})
+	}
+	ctxs = append(ctxs, fakeContext{name: "zz-fast", server: fast.start(t)})
+	path := writeFakeKubeconfig(t, ctxs...)
+	start := time.Now()
+	got, _ := completions(t, "get", "pods", "--kubeconfig", path, "--cache-dir", t.TempDir(), "--contexts", ".", "")
+	if took := time.Since(start); took > 4*time.Second {
+		t.Errorf("took %s, past the deadline", took)
+	}
+	if strings.Join(got, ",") != "web" {
+		t.Errorf("got %v; the one healthy context must still contribute among 300 hung ones", got)
+	}
 }

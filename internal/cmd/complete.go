@@ -22,9 +22,6 @@ import (
 // so a large or partly dead fleet never blocks the shell.
 const completionDeadline = 2500 * time.Millisecond
 
-// completionParallelism caps concurrent cluster calls during completion.
-const completionParallelism = 32
-
 const noFiles = cobra.ShellCompDirectiveNoFileComp
 
 // registerCompletions wires flag completion on root and every subcommand:
@@ -93,24 +90,17 @@ func completionContexts(kubeFlags *genericclioptions.ConfigFlags, o *fleetOption
 	return cfg, refs
 }
 
-// gather calls fn for each context in parallel and returns the union of
+// gather calls fn for every context at once and returns the union of
 // whatever finished before completionDeadline, sorted and de-duplicated.
-// Calls still running are abandoned: completion is a short-lived process.
+// There is deliberately no concurrency cap: a cap lets hung clusters hold
+// every slot for the whole deadline while healthy ones wait. Calls still
+// running are abandoned: completion is a short-lived process.
 func gather(refs []kubeconfig.ContextRef, fn func(context.Context, kubeconfig.ContextRef) []string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), completionDeadline)
 	defer cancel()
 	results := make(chan []string, len(refs))
-	sem := make(chan struct{}, completionParallelism)
 	for _, r := range refs {
-		go func() {
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-				results <- fn(ctx, r)
-			case <-ctx.Done():
-				results <- nil
-			}
-		}()
+		go func() { results <- fn(ctx, r) }()
 	}
 	seen := map[string]bool{}
 	for range refs {
