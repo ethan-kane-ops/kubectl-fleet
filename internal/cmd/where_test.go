@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 // whereFleet is three contexts: old (v1.29.8, 2 nodes), new (v1.31.0,
@@ -133,5 +134,91 @@ func TestNoProbeWithoutWhere(t *testing.T) {
 	}
 	if requested(cl, "/version") {
 		t.Errorf("get without --where should not probe /version: %v", cl.paths())
+	}
+}
+
+// partialFleet is one healthy context ("up") and one with nothing listening
+// ("down").
+func partialFleet(t *testing.T) string {
+	t.Helper()
+	up := &fakeCluster{pods: []fakePod{{"default", "web"}}, nodes: 1}
+	return writeFakeKubeconfig(t,
+		fakeContext{name: "down", server: "http://127.0.0.1:1"},
+		fakeContext{name: "up", server: up.start(t)},
+	)
+}
+
+func TestAllContextsFailedExitsNonZero(t *testing.T) {
+	path := tmpKubeconfigUnreachable(t)
+	for _, args := range [][]string{{"get", "pods"}, {"status"}, {"version"}, {"version", "--detailed"}} {
+		_, _, err := runRoot(t, append(args, "--kubeconfig", path, "--cache-dir", t.TempDir())...)
+		if err == nil || !strings.Contains(err.Error(), "all 1 contexts failed") {
+			t.Errorf("%v: want 'all 1 contexts failed', got %v", args, err)
+		}
+	}
+	// contexts reports reachability; an all-down answer is still an answer.
+	if _, _, err := runRoot(t, "contexts", "--check", "--kubeconfig", path); err != nil {
+		t.Errorf("contexts --check should not fail without --strict: %v", err)
+	}
+}
+
+func TestContextsWhereHonoursTimeout(t *testing.T) {
+	slow := &fakeCluster{delay: 5 * time.Second}
+	path := writeFakeKubeconfig(t, fakeContext{name: "slow", server: slow.start(t)})
+	start := time.Now()
+	out, _, err := runRoot(t, "contexts", "--where", "!reachable", "--timeout", "1s", "--kubeconfig", path, "--cache-dir", t.TempDir())
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("took %s; --timeout 1s should bound each --where probe", took)
+	}
+	if err != nil || !strings.Contains(out, "slow") {
+		t.Errorf("a context slower than --timeout counts as unreachable: err=%v out=%s", err, out)
+	}
+}
+
+func TestWhereReachableEdgeCases(t *testing.T) {
+	denied := &fakeCluster{forbidden: map[string]bool{"/version": true}}
+	cases := []struct {
+		name       string
+		ctxs       []fakeContext
+		args       []string
+		wantErr    string
+		wantStderr string
+	}{
+		{
+			name:    "auth failure is a failure, not unreachable",
+			ctxs:    []fakeContext{{name: "denied", server: denied.start(t)}, {name: "ok", server: (&fakeCluster{}).start(t)}},
+			args:    []string{"status", "--where", "reachable", "--strict"},
+			wantErr: "1 of 2 contexts failed",
+		},
+		{
+			name:    "every context unreachable says so",
+			ctxs:    []fakeContext{{name: "down", server: "http://127.0.0.1:1"}},
+			args:    []string{"status", "--where", "reachable"},
+			wantErr: "all 1 selected contexts are unreachable",
+		},
+		{
+			name:       "nothing down is a successful answer",
+			ctxs:       []fakeContext{{name: "ok", server: (&fakeCluster{}).start(t)}},
+			args:       []string{"contexts", "--where", "!reachable"},
+			wantStderr: "no unreachable contexts",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeFakeKubeconfig(t, tc.ctxs...)
+			_, errOut, err := runRoot(t, append(tc.args, "--kubeconfig", path, "--cache-dir", t.TempDir())...)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want error %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(errOut, tc.wantStderr) {
+				t.Errorf("stderr %q missing %q", errOut, tc.wantStderr)
+			}
+		})
 	}
 }

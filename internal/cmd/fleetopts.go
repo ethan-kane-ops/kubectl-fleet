@@ -32,6 +32,9 @@ type fleetOptions struct {
 	noHeaders   bool
 	where       []string
 	errors      bool
+	// probeTimeout, when set, bounds each --where probe instead of
+	// --request-timeout or probeTimeout (contexts --timeout sets it).
+	probeTimeout time.Duration
 }
 
 func (o *fleetOptions) addFlags(c *cobra.Command, defaultParallelism int) {
@@ -56,7 +59,13 @@ func (o *fleetOptions) finish(w io.Writer, sel selection, work []fleet.Failure, 
 	failures := append(append([]fleet.Failure(nil), sel.failures...), work...)
 	total := attempted + len(sel.failures)
 	reportFailures(w, total, failures, sel.skippedUnreachable, o.errors)
-	if o.strict && len(failures) > 0 {
+	switch {
+	case total > 0 && len(failures) == total:
+		// Nothing could be queried: an empty result would be
+		// indistinguishable from "nothing found", so fail even without
+		// --strict, as kubectl does against an unreachable cluster.
+		return fmt.Errorf("all %d contexts failed", total)
+	case o.strict && len(failures) > 0:
 		return fmt.Errorf("%d of %d contexts failed", len(failures), total)
 	}
 	return nil
@@ -117,14 +126,16 @@ func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericcli
 		attrs where.Attributes
 	}
 	results := fleet.Run(ctx, refs, o.parallelism, func(ctx context.Context, r kubeconfig.ContextRef) (probed, error) {
-		p, attrs := probeContext(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), filter.NeedsNodes())
+		p, attrs := probeContext(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), filter.NeedsNodes(), o.probeTimeout)
 		return probed{probeResult: p, attrs: attrs}, nil
 	})
 	sel := selection{probes: make(map[string]probeResult, len(refs))}
 	for i, res := range results {
 		ref, p := refs[i], res.Value
 		sel.probes[ref.Name] = p.probeResult
-		unreachable := p.version == "" && p.err != nil
+		// Only a network failure means unreachable; a 401 or 403 is a
+		// reachable server refusing us, which must not be skipped.
+		unreachable := p.version == "" && p.err != nil && networkFailure(p.err)
 		switch {
 		case filter.Reachability() == where.UnreachableOnly:
 			if unreachable {
@@ -138,20 +149,37 @@ func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericcli
 			sel.refs = append(sel.refs, ref)
 		}
 	}
-	if len(sel.refs) == 0 && len(sel.failures) == 0 {
-		return selection{}, fmt.Errorf("no matching contexts: --where excluded all %d", len(refs))
+	switch {
+	case len(sel.refs) > 0 || len(sel.failures) > 0, filter.Reachability() == where.UnreachableOnly:
+		// For !reachable an empty selection is an answer: nothing is down.
+		return sel, nil
+	case sel.skippedUnreachable == len(refs):
+		return selection{}, fmt.Errorf("all %d selected contexts are unreachable (skipped by --where reachable)", len(refs))
 	}
-	return sel, nil
+	return selection{}, fmt.Errorf("no matching contexts: --where excluded all %d", len(refs))
+}
+
+// networkFailure reports a probe error that means the API server could not
+// be reached at all.
+func networkFailure(err error) bool {
+	switch fleet.Cause(err) {
+	case "timed out", "connection refused", "DNS lookup failed":
+		return true
+	}
+	return false
 }
 
 // probeContext reads a context's version and, when needed, its node count
 // (a metadata-only list, so no Node bodies are transferred).
-func probeContext(ctx context.Context, kc *kubeconfig.Context, needNodes bool) (probeResult, where.Attributes) {
+func probeContext(ctx context.Context, kc *kubeconfig.Context, needNodes bool, timeout time.Duration) (probeResult, where.Attributes) {
 	restCfg, err := kc.ToRESTConfig()
 	if err != nil {
 		return probeResult{err: err}, where.Attributes{}
 	}
-	if restCfg.Timeout == 0 {
+	switch {
+	case timeout > 0:
+		restCfg.Timeout = timeout
+	case restCfg.Timeout == 0:
 		restCfg.Timeout = probeTimeout
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(restCfg)

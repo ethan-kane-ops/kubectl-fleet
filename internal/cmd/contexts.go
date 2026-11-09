@@ -35,9 +35,14 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			o.probeTimeout = timeout
 			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, true)
 			if err != nil {
 				return err
+			}
+			if len(sel.refs) == 0 && len(sel.failures) == 0 {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no unreachable contexts")
+				return nil
 			}
 			// contexts is the reachability view: a context --where could not
 			// read is shown as an unreachable row, not dropped.

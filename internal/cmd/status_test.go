@@ -34,15 +34,15 @@ func TestStatusStrictFailsOnClusterError(t *testing.T) {
 }
 
 func TestStatusWithoutStrictSucceeds(t *testing.T) {
-	c := newStatusCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c := newStatusCmd(newFlags(partialFleet(t)))
 	var stderr bytes.Buffer
 	c.SetOut(&bytes.Buffer{})
 	c.SetErr(&stderr)
 	c.SetArgs(nil)
 	if err := c.Execute(); err != nil {
-		t.Fatalf("cluster errors should only land in the table without --strict: %v", err)
+		t.Fatalf("one failed context of two should not fail the command without --strict: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "1 of 1 contexts failed") {
+	if !strings.Contains(stderr.String(), "1 of 2 contexts failed") {
 		t.Errorf("stderr should warn about the failed context: %q", stderr.String())
 	}
 }

@@ -39,12 +39,12 @@ func TestGetCmdStrictFailsOnClusterError(t *testing.T) {
 }
 
 func TestGetCmdWithoutStrictSucceeds(t *testing.T) {
-	c := newGetCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c := newGetCmd(newFlags(partialFleet(t)))
 	c.SetOut(&bytes.Buffer{})
 	c.SetErr(&bytes.Buffer{})
 	c.SetArgs([]string{"pods"})
 	if err := c.Execute(); err != nil {
-		t.Fatalf("cluster errors should only land in the table without --strict: %v", err)
+		t.Fatalf("one failed context of two should not fail the command without --strict: %v", err)
 	}
 }
 
