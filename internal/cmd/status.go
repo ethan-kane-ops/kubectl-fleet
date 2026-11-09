@@ -28,8 +28,10 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		top          int
 	)
 	c := &cobra.Command{
-		Use:   "status",
-		Short: "Per-cluster health summary across kubeconfig contexts",
+		Use:     "status",
+		Short:   "Per-cluster health summary across kubeconfig contexts",
+		Long:    statusLong,
+		Example: statusExample,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f, err := o.format()
 			if err != nil {

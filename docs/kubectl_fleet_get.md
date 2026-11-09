@@ -2,8 +2,53 @@
 
 Get a resource across all matching kubeconfig contexts
 
+### Synopsis
+
+Get a resource across every selected context, like kubectl get.
+
+Columns come from each API server, exactly as kubectl shows them,
+including a custom resource's own printer columns. Clusters on different
+versions can render different columns; they are merged by name and a
+cluster leaves blank what it lacks. --server-print=false uses the plugin's
+built-in columns, which are also the fallback for an API that cannot
+render tables.
+
+Without -n or -A each context is queried in its own namespace (default
+"default"). get KIND NAME skips contexts that don't have the object and
+fails only when none do; with -A it finds the name in every namespace.
+
+--problems keeps only unhealthy rows, judged from the STATUS and READY
+columns of any kind: a STATUS other than Running, Completed, Ready, Bound
+and similar, or READY short of its target (1/2). Finished Job pods and
+cordoned nodes count as healthy.
+
+-o json|yaml prints a v1 List of full objects, each annotated with
+kubectl-fleet/context; it streams as clusters answer.
+
 ```
-kubectl fleet get <kind> [name] [flags]
+kubectl fleet get KIND [NAME] [flags]
+```
+
+### Examples
+
+```
+  # Pods in each context's own namespace
+  kubectl fleet get pods
+
+  # Deployments in one namespace on production clusters
+  kubectl fleet get deploy -n payments --contexts '^prod-'
+
+  # Only unhealthy pods, fleet-wide
+  kubectl fleet get pods -A --problems
+
+  # Where does the api deployment run, in any namespace?
+  kubectl fleet get deploy api -A
+
+  # Argo CD applications with their sync and health columns
+  kubectl fleet get applications -A
+
+  # Scripting: one context/namespace/name per line
+  kubectl fleet get pods -A -l app=api -o name
 ```
 
 ### Options

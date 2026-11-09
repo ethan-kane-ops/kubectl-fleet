@@ -1,9 +1,12 @@
-// Command gendocs generates markdown command reference docs for
-// kubectl-fleet into ./docs. Run via `just docs`.
+// Command gendocs generates the markdown command reference into ./docs
+// (`just docs`, committed). With -man DIR it writes man pages there instead
+// (the release build, which ships them in the archives: a man page carries
+// a date, so committing them would churn).
 package main
 
 import (
 	"bytes"
+	"flag"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,8 +17,24 @@ import (
 )
 
 func main() {
+	man := flag.String("man", "", "write man pages (section 1) to this directory instead of markdown to ./docs")
+	flag.Parse()
 	root := cmd.NewRootCmd()
 	root.DisableAutoGenTag = true
+
+	if *man != "" {
+		if err := os.MkdirAll(*man, 0o755); err != nil {
+			log.Fatal(err)
+		}
+		header := &doc.GenManHeader{Title: "KUBECTL-FLEET", Section: "1", Source: "kubectl-fleet", Manual: "kubectl-fleet manual"}
+		if err := doc.GenManTree(root, header, *man); err != nil {
+			log.Fatal(err)
+		}
+		if err := normalizeHomeDir(*man); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	if err := os.MkdirAll("docs", 0o755); err != nil {
 		log.Fatal(err)

@@ -51,6 +51,10 @@ install:
 docs:
     go run ./cmd/gendocs
 
+# Generate man pages into build/man (release archives ship them)
+man:
+    go run ./cmd/gendocs -man build/man
+
 # Regenerate the README demo gif (requires vhs: https://github.com/charmbracelet/vhs)
 demo:
     vhs demo.tape

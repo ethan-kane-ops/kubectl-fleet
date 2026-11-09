@@ -5,6 +5,7 @@ project_name: kubectl-fleet
 before:
   hooks:
     - go mod tidy
+    - go run ./cmd/gendocs -man build/man
 
 builds:
   - id: kubectl-fleet
@@ -42,6 +43,8 @@ archives:
       # the binary.
       - src: hack/kubectl_complete-fleet
         dst: kubectl_complete-fleet
+      - src: build/man/*.1
+        dst: man
 
 checksum:
   name_template: "checksums.txt"

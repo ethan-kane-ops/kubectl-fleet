@@ -2,8 +2,42 @@
 
 Per-cluster health summary across kubeconfig contexts
 
+### Synopsis
+
+Summarise each cluster's health: control-plane version, nodes
+ready/total, and pod counts (running, pending, crashlooping), with failed
+pods, total pods and the noisiest namespaces under -o wide.
+
+--problems keeps clusters with NotReady nodes or Pending, Failed or
+crashlooping pods. --sort-by nodes|pods|version puts the largest (or
+newest) first, --sort-by context orders by name, and --top N keeps the
+first N after sorting. --since adds a count of containers restarted in
+that window.
+
+-o json|yaml prints one record per context with numeric fields; a failed
+context has only context and error.
+
 ```
 kubectl fleet status [flags]
+```
+
+### Examples
+
+```
+  # Every cluster
+  kubectl fleet status
+
+  # Only clusters with something wrong
+  kubectl fleet status --problems
+
+  # The 10 largest clusters by pod count
+  kubectl fleet status --sort-by pods --top 10
+
+  # Restarts in the last hour, production only
+  kubectl fleet status --contexts '^prod-' --since 1h
+
+  # Crashlooping clusters from JSON
+  kubectl fleet status -o json | jq -r '.[] | select(.podsCrashLoop > 0) | .context'
 ```
 
 ### Options

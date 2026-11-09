@@ -22,8 +22,10 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		timeout time.Duration
 	)
 	c := &cobra.Command{
-		Use:   "contexts",
-		Short: "List kubeconfig contexts, with optional reachability probe",
+		Use:     "contexts",
+		Short:   "List kubeconfig contexts, with optional reachability probe",
+		Long:    contextsLong,
+		Example: contextsExample,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f, err := o.format()
 			if err != nil {

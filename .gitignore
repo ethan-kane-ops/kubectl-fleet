@@ -1,5 +1,6 @@
 bin/
 dist/
+build/
 e2e/.kubeconfig
 *.test
 *.out

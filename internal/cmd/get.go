@@ -59,9 +59,11 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		problemsOnly  bool
 	)
 	c := &cobra.Command{
-		Use:   "get <kind> [name]",
-		Short: "Get a resource across all matching kubeconfig contexts",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:     "get KIND [NAME]",
+		Short:   "Get a resource across all matching kubeconfig contexts",
+		Long:    getLong,
+		Example: getExample,
+		Args:    cobra.RangeArgs(1, 2),
 		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			switch len(args) {
 			case 0:

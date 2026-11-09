@@ -22,8 +22,10 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		perCluster bool
 	)
 	c := &cobra.Command{
-		Use:   "version",
-		Short: "Print plugin and per-cluster Kubernetes server versions",
+		Use:     "version",
+		Short:   "Print plugin and per-cluster Kubernetes server versions",
+		Long:    versionLong,
+		Example: versionExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := o.format()
 			if err != nil {
