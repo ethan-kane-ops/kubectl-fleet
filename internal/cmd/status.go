@@ -145,7 +145,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&problemsOnly, "problems", false, "show only clusters with NotReady nodes or Pending, Failed or crashlooping pods")
-	c.Flags().StringVar(&sortBy, "sort-by", "", "order clusters: nodes, pods or version (largest first) or context")
+	c.Flags().StringVar(&sortBy, "sort-by", "", "order clusters: nodes (total), pods (running) or version, largest first; or context, by name")
 	c.Flags().IntVar(&top, "top", 0, "keep only the first N clusters after sorting (0 = all)")
 	c.Flags().DurationVar(&since, "since", 0, "if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)")
 	o.addFlags(c, defaultParallelism)
@@ -184,7 +184,9 @@ func sortSummaries(rows []contextSummary, key string) {
 		case "nodes":
 			c = b.NodesTotal - a.NodesTotal
 		case "pods":
-			c = b.PodsTotal - a.PodsTotal
+			// The PODS column: running pods, so the sorted column reads in
+			// order.
+			c = b.PodsRunning - a.PodsRunning
 		case "version":
 			c = where.CompareServerVersions(b.ServerVersion, a.ServerVersion)
 		}

@@ -9,7 +9,8 @@ Run read-only kubectl operations across many clusters at once.
 kubectl fleet queries every context in your kubeconfig in parallel and
 merges the answers into one table, with a CONTEXT column. A cluster that
 fails never stops the run: failures are summarised on stderr, grouped by
-cause, and --strict turns them into a non-zero exit.
+cause, and --strict turns them into a non-zero exit. When every context
+fails the command exits non-zero regardless.
 
 Choosing clusters (on every command):
   --contexts REGEX     contexts whose name matches (default: all)

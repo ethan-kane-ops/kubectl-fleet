@@ -173,7 +173,8 @@ Failed clusters never abort the run. A one-line summary on stderr counts them
 and groups them by cause (`warn: 3 of 40 contexts failed: 2 timed out
 (prod-eu-3, prod-eu-7), 1 forbidden (dev-a). Use --errors for details.`).
 `--errors` adds an `<error>` row with an `ERROR` column per failed context
-(never in `-o name|json|yaml`) and one `warn:` line each. Without `-n` or `-A`, each context is queried in its own
+(never in `-o name|json|yaml`) and one `warn:` line each. When every
+context fails, the command exits non-zero even without `--strict`. Without `-n` or `-A`, each context is queried in its own
 namespace, falling back to `default`. `get KIND NAME` skips contexts that
 don't have the object and errors only when none of them do. With `-A`, it
 finds the name in every namespace of every context.
@@ -267,8 +268,8 @@ kubectl fleet get deploy api -A
 
 ## Large fleets
 
-kubectl-fleet is load-tested at 300 contexts and at 20 clusters of 10,000
-pods each (`just loadtest`).
+kubectl-fleet is load-tested at 200 contexts (20 of them unreachable) and
+at 20 clusters of 10,000 pods each (`just loadtest`).
 
 - **Parallelism.** `--parallelism` (default 32, 16 for `get`) caps how many
   contexts are queried at once. Each API server only ever sees its own
@@ -279,7 +280,7 @@ pods each (`just loadtest`).
   wedged cluster can't stretch the run.
 - **Failures.** Failed contexts are summarised in one stderr line, grouped
   by cause. Add `--errors` for each context's full error and `--strict` to
-  fail the run.
+  fail the run when any context fails (it always fails when all do).
 - **Discovery cache.** Resource discovery is cached per cluster in
   `~/.kube/cache` (shared with kubectl), so repeated runs mostly skip it.
 - **Interactive login plugins.** Credential plugins that prompt (MFA codes,
