@@ -175,3 +175,18 @@ func TestContextsCheckTimeoutIsPerContext(t *testing.T) {
 		t.Fatalf("every probe fits its own timeout: %v", err)
 	}
 }
+
+func TestFormatLatency(t *testing.T) {
+	cases := map[time.Duration]string{
+		4886750 * time.Nanosecond: "5ms",
+		128 * time.Millisecond:    "128ms",
+		1500 * time.Millisecond:   "1.5s",
+		300 * time.Microsecond:    "<1ms",
+		0:                         "",
+	}
+	for d, want := range cases {
+		if got := formatLatency(d); got != want {
+			t.Errorf("formatLatency(%v)=%q want %q", d, got, want)
+		}
+	}
+}

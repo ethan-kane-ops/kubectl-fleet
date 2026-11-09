@@ -119,11 +119,11 @@ kubectl fleet contexts --where '!reachable'
 Sample output:
 
 ```
-CONTEXT      CLUSTER       NAMESPACE     REACHABLE   VERSION     LATENCY
-prod-eu-1    prod-eu-1     default       yes         v1.31.2     42ms
-prod-us-1    prod-us-1     default       yes         v1.31.2     128ms
-prod-ap-1    prod-ap-1     default       yes         v1.30.6     310ms
-dev-local    k3d-dev       kube-system   no          -           -
+CONTEXT     CLUSTER     NAMESPACE     AUTH        REACHABLE   VERSION   LATENCY   ERROR
+prod-eu-1   prod-eu-1                 prod-eu-1   yes         v1.31.2   42ms
+prod-us-1   prod-us-1                 prod-us-1   yes         v1.31.2   128ms
+prod-ap-1   prod-ap-1                 prod-ap-1   yes         v1.30.6   310ms
+dev-local   k3d-dev     kube-system   dev-admin   no                    3s        server version: Get "https://10.20.0.4:6443/version?timeout=3s": dial tcp 10.20.0.4:6443: i/o timeout
 ```
 
 ### `kubectl fleet get`

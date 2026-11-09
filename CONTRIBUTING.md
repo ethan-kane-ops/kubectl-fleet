@@ -68,16 +68,20 @@ README.md; regenerate it with `just demo` if those samples change.
 
 ```
 cmd/kubectl-fleet/main.go    Entry; ldflag-injected version/commit/date
-cmd/gendocs/main.go          Generates docs/ from the cobra command tree
+cmd/gendocs/main.go          Generates docs/ (and, with -man, the release man pages)
 internal/cmd/                Cobra subcommands; one verb per file
 internal/kubeconfig/         Multi-context loader + REST config builder
 internal/fleet/              Bounded parallel executor (errgroup with SetLimit)
 internal/k8s/                Typed + dynamic + discovery client factory; GVR resolver
 internal/output/             Table/JSON/YAML printers
 internal/health/             Per-cluster summary used by `status`
+internal/where/              `--where` expressions: version, nodes, reachable
+internal/inventory/          Version inventory behind `version --detailed`
+internal/printers/           Built-in columns, the fallback behind server-side tables
 docs/                        Generated command reference (see `just docs`)
 e2e/                         Black-box tests against real kind clusters (see `just e2e`)
 hack/loadtest/               Scale regression check against fake fleets (see `just loadtest`)
+hack/kubectl_complete-fleet  Completion helper for `kubectl fleet <TAB>` (ships in releases)
 ```
 
 New subcommands live in `internal/cmd/`, register in `NewRootCmd` (`root.go`), and

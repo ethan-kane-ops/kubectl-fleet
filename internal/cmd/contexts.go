@@ -77,9 +77,9 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					p := probes[i]
 					switch {
 					case p.Err != nil:
-						wide = []string{"no", "", p.Value.latency.String(), p.Err.Error()}
+						wide = []string{"no", "", formatLatency(p.Value.latency), p.Err.Error()}
 					default:
-						wide = []string{"yes", p.Value.version, p.Value.latency.String(), ""}
+						wide = []string{"yes", p.Value.version, formatLatency(p.Value.latency), ""}
 					}
 				}
 				tbl.Append([]string{r.Name, r.Cluster, r.Namespace, r.AuthInfo}, wide)
@@ -106,6 +106,19 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	c.Flags().StringVar(&o.contexts, "filter", "", "regex selecting kubeconfig contexts by name")
 	_ = c.Flags().MarkDeprecated("filter", "use --contexts")
 	return c
+}
+
+// formatLatency rounds a probe latency to whole milliseconds for display:
+// sub-millisecond noise says nothing about reachability. Zero (no probe
+// completed) renders empty.
+func formatLatency(d time.Duration) string {
+	switch {
+	case d == 0:
+		return ""
+	case d < time.Millisecond:
+		return "<1ms"
+	}
+	return d.Round(time.Millisecond).String()
 }
 
 // withFailedRefs returns the selected contexts plus those --where could not
