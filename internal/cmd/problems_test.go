@@ -28,6 +28,13 @@ func TestProblemRow(t *testing.T) {
 		{"daemonset full", []string{"NAME", "DESIRED", "CURRENT", "READY"}, []string{"ds", "3", "3", "3"}, false, true},
 		{"pvc bound", []string{"NAME", "STATUS", "VOLUME"}, []string{"data", "Bound", "pv-1"}, false, true},
 		{"no readiness columns", []string{"NAME", "DATA", "AGE"}, []string{"cm", "2", "1d"}, false, false},
+		{"certificate not ready", []string{"NAME", "READY", "SECRET", "AGE"}, []string{"c", "False", "s", "1d"}, true, true},
+		{"certificate ready", []string{"NAME", "READY", "SECRET", "AGE"}, []string{"c", "True", "s", "1d"}, false, true},
+		{"condition unknown", []string{"NAME", "READY"}, []string{"c", "Unknown"}, true, true},
+		{"flux ready with message", []string{"NAME", "AGE", "READY", "STATUS"}, []string{"app", "1d", "True", "Applied revision: main@sha1:abc"}, false, true},
+		{"flux failing with message", []string{"NAME", "AGE", "READY", "STATUS"}, []string{"app", "1d", "False", "install retries exhausted"}, true, true},
+		{"free-text status alone", []string{"NAME", "STATUS"}, []string{"x", "Waiting for dependencies"}, false, true},
+		{"empty status, ready full", []string{"NAME", "READY", "STATUS"}, []string{"x", "1/1", ""}, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
