@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -62,12 +63,12 @@ func TestVersionCmd_strictFailsOnClusterError(t *testing.T) {
 }
 
 func TestVersionCmd_withoutStrictSucceeds(t *testing.T) {
-	c := newVersionCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c := newVersionCmd(newFlags(partialFleet(t)))
 	c.SetOut(&bytes.Buffer{})
 	c.SetErr(&bytes.Buffer{})
 	c.SetArgs(nil)
 	if err := c.Execute(); err != nil {
-		t.Fatalf("cluster errors should only land in the table without --strict: %v", err)
+		t.Fatalf("one failed context of two should not fail the command without --strict: %v", err)
 	}
 }
 
@@ -98,5 +99,80 @@ func TestClientRow(t *testing.T) {
 	}
 	if wide[1] != buildinfo.Date {
 		t.Errorf("BUILD_DATE = %q", wide[1])
+	}
+}
+
+func TestVersionDetailed(t *testing.T) {
+	sys := map[string]string{"coredns": "registry.k8s.io/coredns/coredns:v1.11.1"}
+	path := writeFakeKubeconfig(t,
+		fakeContext{name: "a", server: (&fakeCluster{nodes: 3, kubelet: "v1.30.4", gitVersion: "v1.30.4", systemDeployments: sys,
+			systemDaemonSets: map[string]string{"kube-proxy": "registry.k8s.io/kube-proxy:v1.30.4"}}).start(t)},
+		fakeContext{name: "b", server: (&fakeCluster{nodes: 2, kubelet: "v1.30.4", gitVersion: "v1.30.4", systemDeployments: sys}).start(t)},
+		fakeContext{name: "dead", server: "http://127.0.0.1:1"},
+	)
+	cases := []struct {
+		name       string
+		args       []string
+		want       []string
+		notWant    []string
+		wantStderr string
+	}{
+		{
+			name: "fleet spread by default",
+			args: []string{"version", "--detailed"},
+			want: []string{`(?m)^COMPONENT\s+VERSION\s+CLUSTERS$`, `kube-apiserver\s+v1\.30\.4\s+2`, `kubelet\s+v1\.30\.4\s+2`,
+				`coredns\s+v1\.11\.1\s+2`, `kube-proxy\s+v1\.30\.4\s+1`, `container-runtime\s+containerd://2\.1\.1\s+2`},
+			notWant:    []string{`kubectl-fleet`},
+			wantStderr: "1 of 3 contexts failed",
+		},
+		{
+			name: "one row per cluster",
+			args: []string{"version", "--detailed", "--per-cluster"},
+			want: []string{`(?m)^CONTEXT\s+COMPONENT\s+VERSION\s+NODES$`, `a\s+kubelet\s+v1\.30\.4\s+3`, `b\s+kubelet\s+v1\.30\.4\s+2`, `a\s+kube-proxy\s+v1\.30\.4`},
+		},
+		{
+			name: "json carries per-cluster detail",
+			args: []string{"version", "--detailed", "-o", "json"},
+			want: []string{`"context": "a"`, `"kubelets": \[`, `"components": \[`, `"context": "dead",\s+"error"`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, errOut, err := runRoot(t, append(tc.args, "--kubeconfig", path, "--cache-dir", t.TempDir())...)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			for _, w := range tc.want {
+				if !regexp.MustCompile(w).MatchString(out) {
+					t.Errorf("output does not match %q:\n%s", w, out)
+				}
+			}
+			for _, w := range tc.notWant {
+				if regexp.MustCompile(w).MatchString(out) {
+					t.Errorf("output should not match %q:\n%s", w, out)
+				}
+			}
+			if tc.wantStderr != "" && !strings.Contains(errOut, tc.wantStderr) {
+				t.Errorf("stderr %q missing %q", errOut, tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestVersionDetailedPartialWithoutNodeRBAC(t *testing.T) {
+	path := writeFakeKubeconfig(t, fakeContext{name: "locked", server: (&fakeCluster{nodes: 2,
+		systemDeployments: map[string]string{"coredns": "coredns:v1.11.1"},
+		forbidden:         map[string]bool{"/api/v1/nodes": true}}).start(t)})
+	out, errOut, err := runRoot(t, "version", "--detailed", "--per-cluster", "--strict", "--kubeconfig", path, "--cache-dir", t.TempDir())
+	if err != nil {
+		t.Fatalf("a partial cluster is not a failure: %v", err)
+	}
+	for _, w := range []string{`locked\s+\(partial\)\s+nodes: forbidden`, `locked\s+coredns\s+v1\.11\.1`} {
+		if !regexp.MustCompile(w).MatchString(out) {
+			t.Errorf("output does not match %q:\n%s", w, out)
+		}
+	}
+	if !strings.Contains(errOut, "1 contexts returned partial results (nodes: forbidden): locked") {
+		t.Errorf("stderr=%q", errOut)
 	}
 }

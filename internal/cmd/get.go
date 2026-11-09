@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,19 +52,27 @@ type getRequest struct {
 
 func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		filter        string
-		parallelism   int
+		o             fleetOptions
 		labelSelector string
 		allNamespaces bool
-		outputFlag    string
-		noHeaders     bool
-		strict        bool
 		serverPrint   bool
+		problemsOnly  bool
 	)
 	c := &cobra.Command{
-		Use:   "get <kind> [name]",
-		Short: "Get a resource across all matching kubeconfig contexts",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:     "get KIND [NAME]",
+		Short:   "Get a resource across all matching kubeconfig contexts",
+		Long:    getLong,
+		Example: getExample,
+		Args:    cobra.RangeArgs(1, 2),
+		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			switch len(args) {
+			case 0:
+				return completeKinds(kubeFlags, &o), noFiles
+			case 1:
+				return completeNames(kubeFlags, &o, args[0], allNamespaces), noFiles
+			}
+			return nil, noFiles
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kind := args[0]
 			var name string
@@ -73,21 +82,22 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if name != "" && labelSelector != "" {
 				return fmt.Errorf("a resource name cannot be combined with --selector")
 			}
-			f, err := output.ParseFormat(outputFlag)
+			f, err := o.format()
 			if err != nil {
 				return err
+			}
+			if problemsOnly && f.Structured() {
+				return fmt.Errorf("--problems works with table, wide and name output")
 			}
 			cfg, err := kubeconfig.Load(kubeFlags)
 			if err != nil {
 				return err
 			}
-			refs, err := kubeconfig.Select(kubeFlags, cfg, filter)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
 			if err != nil {
 				return err
 			}
-			if len(refs) == 0 {
-				return fmt.Errorf("no matching contexts")
-			}
+			refs := sel.refs
 
 			req := getRequest{kind: kind, name: name, selector: labelSelector, allNamespaces: allNamespaces, serverPrint: serverPrint, format: f}
 			fetch := func(ctx context.Context, r kubeconfig.ContextRef) (fetchedResource, error) {
@@ -106,13 +116,15 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			}
 			var (
 				collected []fleet.ClusterResult[fetchedResource] // table, wide, name
+				anyOK     bool                                   // --problems: some context answered
+				anyJudged bool                                   // --problems: some context had STATUS or READY
 				encoded   [][]byte                               // buffered json/yaml
 				chosen    *schema.GroupResource
 				found     int
-				failed    int
+				failures  []fleet.Failure
 				writeErr  error
 			)
-			fleet.Stream(cmd.Context(), refs, parallelism, fetch, func(res fleet.ClusterResult[fetchedResource]) {
+			fleet.Stream(cmd.Context(), refs, o.parallelism, fetch, func(res fleet.ClusterResult[fetchedResource]) {
 				// Rows are projected with each context's own schema; a context
 				// that resolves the kind to another group/resource than the
 				// first successful one would not line up, so it is reported.
@@ -125,13 +137,18 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					}
 				}
 				if res.Err != nil {
-					failed++
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
+					failures = append(failures, fleet.Failure{Context: res.Context, Err: res.Err})
 				} else {
 					found += res.Value.count
 				}
 				switch {
 				case !f.Structured():
+					if problemsOnly && res.Err == nil {
+						anyOK = true
+						if keepProblems(&res.Value) {
+							anyJudged = true
+						}
+					}
 					collected = append(collected, res)
 				case res.Err != nil:
 				case lw != nil:
@@ -147,35 +164,60 @@ func newGetCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if writeErr != nil {
 				return writeErr
 			}
+			if problemsOnly && anyOK && !anyJudged {
+				return fmt.Errorf("--problems needs a READY or STATUS column; %s has neither", kind)
+			}
 
 			switch {
 			case name != "" && found == 0:
+				_ = o.finish(cmd.ErrOrStderr(), sel, failures, len(refs))
 				return fmt.Errorf("%s %q not found in any reachable context", kind, name)
 			case lw != nil:
 				err = lw.Close()
 			case f.Structured():
 				err = writeList(cmd.OutOrStdout(), encoded, f)
 			default:
-				err = output.Print(cmd.OutOrStdout(), buildGetTable(kind, collected, f, noHeaders), f)
+				err = output.Print(cmd.OutOrStdout(), buildGetTable(kind, collected, f, o.noHeaders, o.errors), f)
 			}
 			if err != nil {
 				return err
 			}
-			if strict && failed > 0 {
-				return fmt.Errorf("%d of %d contexts failed", failed, len(refs))
-			}
-			return nil
+			return o.finish(cmd.ErrOrStderr(), sel, failures, len(refs))
 		},
 	}
-	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", defaultGetParallelism, "max parallel cluster calls (0=unbounded); each in-flight context holds a page of up to 500 decoded objects")
 	c.Flags().StringVarP(&labelSelector, "selector", "l", "", "label selector")
 	c.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "query across all namespaces")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
-	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
-	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
+	c.Flags().BoolVar(&problemsOnly, "problems", false, "show only unhealthy rows: STATUS not healthy (Running, Completed, Ready, Bound…) or READY short (1/2)")
 	c.Flags().BoolVar(&serverPrint, "server-print", true, "let each API server render the table columns, as kubectl does; false uses built-in columns")
+	o.addFlags(c, defaultGetParallelism)
+	o.addErrorsFlag(c)
+	c.Flags().Lookup("parallelism").Usage = "max contexts queried at once (0=unbounded); each in-flight context holds a page of up to 500 decoded objects"
 	return c
+}
+
+// keepProblems trims a context's rows to the unhealthy ones (problemRow).
+// It returns false, keeping no rows, when the context's columns have neither
+// STATUS nor READY to judge by.
+func keepProblems(v *fetchedResource) bool {
+	if !slices.Contains(v.columns, "STATUS") && !slices.Contains(v.columns, "READY") {
+		v.rows, v.wide = nil, nil
+		return false
+	}
+	off := 0
+	if v.namespaced {
+		off = 1
+	}
+	var rows, wide [][]string
+	for j, row := range v.rows {
+		if problem, _ := problemRow(v.columns, row[min(off, len(row)):]); problem {
+			rows = append(rows, row)
+			if j < len(v.wide) {
+				wide = append(wide, v.wide[j])
+			}
+		}
+	}
+	v.rows, v.wide = rows, wide
+	return true
 }
 
 // ContextAnnotation names the kubeconfig context an object came from in
@@ -187,7 +229,10 @@ const ContextAnnotation = "kubectl-fleet/context"
 // version), so columns are merged by name, each keeping its place relative
 // to its neighbours, and a context leaves blank the columns it lacks. With no successful context the header
 // falls back to the kind's built-in columns.
-func buildGetTable(kind string, results []fleet.ClusterResult[fetchedResource], f output.Format, noHeaders bool) *output.Table {
+//
+// Failed contexts become <error> rows only with showErrors (--errors), which
+// also moves the ERROR column into the regular columns.
+func buildGetTable(kind string, results []fleet.ClusterResult[fetchedResource], f output.Format, noHeaders, showErrors bool) *output.Table {
 	var cols, wideCols columnSet
 	namespaced, anyOK := false, false
 	for _, res := range results {
@@ -228,7 +273,7 @@ func buildGetTable(kind string, results []fleet.ClusterResult[fetchedResource], 
 		if res.Err != nil {
 			// -o name feeds scripts; an "<error>" placeholder there would read
 			// as an object name. The stderr warning reports it.
-			if f != output.FormatName {
+			if showErrors && f != output.FormatName {
 				row := make([]string, len(tbl.Headers))
 				row[0], row[prefix] = res.Context, "<error>"
 				wide := make([]string, len(tbl.WideHeaders))
@@ -270,6 +315,9 @@ func buildGetTable(kind string, results []fleet.ClusterResult[fetchedResource], 
 			}
 			tbl.Append(row, wide)
 		}
+	}
+	if showErrors {
+		promoteErrorColumn(tbl)
 	}
 	return tbl
 }

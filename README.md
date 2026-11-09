@@ -62,9 +62,22 @@ kubectl fleet --help
 
 ### Shell completion
 
-`kubectl-fleet` gets Cobra's completion generator for free. It's scoped to
-the `kubectl-fleet` binary name (not `kubectl`), so it completes direct
-invocations without touching real kubectl's own completion:
+Completion covers subcommands, flags, context names (`--context`,
+`--contexts`, `--exclude`), resource kinds and object names for `get`, and
+the values of `-o`, `--sort-by` and `--where`. Kinds and names come from
+the clusters themselves, capped at 2.5 seconds: on a large or partly
+unreachable fleet, completion offers what answered in time rather than
+hanging the shell.
+
+**`kubectl fleet <TAB>`** (kubectl 1.26+): put the `kubectl_complete-fleet`
+helper on your PATH next to `kubectl-fleet`, with kubectl's own completion
+enabled. Release archives include it; `just install` installs it.
+
+```bash
+install -m 0755 kubectl_complete-fleet "$(dirname "$(command -v kubectl-fleet)")"
+```
+
+**`kubectl-fleet <TAB>`** (calling the binary directly):
 
 ```bash
 # bash (current shell only)
@@ -78,8 +91,7 @@ kubectl-fleet completion fish | source
 ```
 
 Run `kubectl-fleet completion --help` for persistent per-shell install
-instructions. This completes `kubectl-fleet <TAB>`, not `kubectl fleet <TAB>`,
-since kubectl doesn't forward completion requests to plugins.
+instructions.
 
 ## Commands
 
@@ -98,7 +110,10 @@ kubectl fleet contexts
 kubectl fleet contexts --check --timeout 3s
 
 # narrow to a subset via regex on context name
-kubectl fleet contexts --filter '^prod-' --check
+kubectl fleet contexts --contexts '^prod-' --check
+
+# only the contexts that are down, with the cause
+kubectl fleet contexts --where '!reachable'
 ```
 
 Sample output:
@@ -135,21 +150,32 @@ kubectl fleet get pods -A -l app=ingress-nginx --contexts '^prod-'
 
 # single named resource: compare the same Deployment across clusters
 kubectl fleet get deploy api -n payments --contexts '^prod-'
+
+# only unhealthy pods, fleet-wide
+kubectl fleet get pods -A --problems
 ```
 
 Sample output:
 
 ```
-CONTEXT      NAMESPACE    NAME                          AGE
-prod-eu-1    payments     api-7d4f6c5b9-abcde           4d
-prod-us-1    payments     api-7d4f6c5b9-fghij           4d
-prod-ap-1    payments     api-9b2a4e1d3-klmno           1h
+CONTEXT      NAMESPACE    NAME                    READY   STATUS             RESTARTS   AGE
+prod-eu-1    payments     api-7d4f6c5b9-abcde     1/1     Running            0          4d
+prod-us-1    payments     api-7d4f6c5b9-fghij     0/1     CrashLoopBackOff   12         4d
+prod-ap-1    payments     api-9b2a4e1d3-klmno     1/1     Running            0          1h
 ```
 
-Failed clusters never abort the run. Per-context errors land in the table with
-`<error>` in the `NAME` column (left out of `-o name|json|yaml`) and surface a `warn:`
-line on stderr. Without `-n` or `-A`, each context is queried in its own
-namespace, falling back to `default`. `get <kind> <name>` skips contexts that
+`--problems` keeps only unhealthy rows, judged from the STATUS and READY
+columns of any kind: a STATUS other than Running, Completed, Ready, Bound
+and similar, or READY short of its target (`1/2`). Finished Job pods and
+cordoned nodes count as healthy.
+
+Failed clusters never abort the run. A one-line summary on stderr counts them
+and groups them by cause (`warn: 3 of 40 contexts failed: 2 timed out
+(prod-eu-3, prod-eu-7), 1 forbidden (dev-a). Use --errors for details.`).
+`--errors` adds an `<error>` row with an `ERROR` column per failed context
+(never in `-o name|json|yaml`) and one `warn:` line each. When every
+context fails, the command exits non-zero even without `--strict`. Without `-n` or `-A`, each context is queried in its own
+namespace, falling back to `default`. `get KIND NAME` skips contexts that
 don't have the object and errors only when none of them do. With `-A`, it
 finds the name in every namespace of every context.
 
@@ -162,10 +188,106 @@ crashlooping; completed Job pods don't count).
 ```bash
 kubectl fleet status
 kubectl fleet status --contexts '^prod-' -o wide
+kubectl fleet status --problems                    # only clusters with something wrong
+kubectl fleet status --sort-by pods --top 10       # the 10 biggest clusters by pods
 kubectl fleet status -o json | jq '.[] | select(.podsCrashLoop > 0) | .context'
 ```
 
-Wide output adds `FAILED`, `TOTAL_PODS`, `TOP_NOISY`, and `ERROR` columns.
+Wide output adds `FAILED`, `TOTAL_PODS` and `TOP_NOISY` columns.
+`--sort-by nodes|pods|version` puts the largest (or newest) first and
+`--sort-by context` orders by name.
+
+### `kubectl fleet version`
+
+The plugin's version and every cluster's control-plane version. With
+`--detailed`, also what runs on the nodes and in kube-system: kubelet, OS
+image, kernel, container runtime and architecture, plus the image tag of
+every kube-system Deployment and DaemonSet (CoreDNS, kube-proxy, the CNI,
+CSI drivers). By default that prints the fleet-wide spread:
+
+```
+$ kubectl fleet version --detailed
+COMPONENT           VERSION                         CLUSTERS
+kube-apiserver      v1.30.4-eks-a737599             180
+kube-apiserver      v1.29.8-eks-a737599             20
+kubelet             v1.30.4-eks-a737599             175
+kubelet             v1.29.8-eks-a737599             25
+os-image            Bottlerocket OS 1.20.0          200
+container-runtime   containerd://1.7.13             200
+coredns             v1.11.1-eksbuild.9              180
+coredns             v1.10.1-eksbuild.13             20
+```
+
+`--per-cluster` (or `-o wide`) gives one row per context, with node counts
+for kubelet and OS values; `-o json` carries everything per cluster. A
+cluster where you can't list nodes or kube-system workloads returns a
+partial result, noted on stderr, instead of failing.
+
+## Choosing clusters
+
+Every command takes the same selectors:
+
+| Flag | Selects |
+| ---- | ------- |
+| `--contexts REGEX` | contexts whose name matches (default: all) |
+| `--exclude REGEX` | leaves out matching names, applied after `--contexts` |
+| `--context NAME` | exactly one context, overriding both |
+| `--where EXPR` | live attributes, repeatable, all must match |
+
+`--where` understands `version` (`version<1.30`, `version>=1.29.3`; compared
+at the precision you type, vendor suffixes such as `-eks-…` ignored),
+`nodes` (`nodes>50`) and `reachable` / `!reachable`. It costs one quick
+probe per context, and only when used. `reachable` skips unreachable
+contexts without counting them as failures; `!reachable` works only on
+`contexts`, where it lists the dead ones with the cause.
+
+## Recipes
+
+```bash
+# Crashlooping or unready pods across production
+kubectl fleet get pods -A --problems --contexts '^prod-'
+
+# Which clusters are still on 1.29, and what runs on them
+kubectl fleet version --detailed --per-cluster --where 'version<1.30'
+
+# Kubelet skew and add-on versions across the fleet before an upgrade
+kubectl fleet version --detailed
+
+# The 10 biggest clusters by node count
+kubectl fleet status --sort-by nodes --top 10
+
+# Everything except dev and staging, skipping clusters that are down
+kubectl fleet status --exclude '^(dev|stage)-' --where reachable
+
+# What failed, and why
+kubectl fleet status --errors
+
+# Where does a deployment run, in any namespace?
+kubectl fleet get deploy api -A
+```
+
+## Large fleets
+
+kubectl-fleet is load-tested at 200 contexts (20 of them unreachable) and
+at 20 clusters of 10,000 pods each (`just loadtest`).
+
+- **Parallelism.** `--parallelism` (default 32, 16 for `get`) caps how many
+  contexts are queried at once. Each API server only ever sees its own
+  requests, so this protects your machine, not the clusters. `get` holds a
+  page of up to 500 decoded objects per in-flight context.
+- **Timeouts.** A cluster that never answers holds its slot until the
+  request times out. Set `--request-timeout 30s` on large fleets so one
+  wedged cluster can't stretch the run.
+- **Failures.** Failed contexts are summarised in one stderr line, grouped
+  by cause. Add `--errors` for each context's full error and `--strict` to
+  fail the run when any context fails (it always fails when all do).
+- **Discovery cache.** Resource discovery is cached per cluster in
+  `~/.kube/cache` (shared with kubectl), so repeated runs mostly skip it.
+- **Interactive login plugins.** Credential plugins that prompt (MFA codes,
+  browser SSO) run once per context and in parallel; use
+  `--parallelism 1` so prompts don't interleave.
+- **Memory.** Table output keeps rows, not objects; `-o json|yaml` streams
+  as contexts finish.
 
 ## Output formats
 
@@ -189,8 +311,9 @@ Every command honours `-o`:
 - `contexts`, `version`: one object per table row, keyed by column header.
 
 Failed contexts are left out of `get`'s `json`, `yaml` and `name` output and
-reported on stderr instead. `-o name` joins fields with `/`, so it is ambiguous for
-context names that contain one (EKS ARNs, for example); use `-o json` there.
+reported on stderr instead. `-o name` joins fields with `/`, so it is
+ambiguous for context names that contain one (EKS ARNs, for example); use
+`-o json` there.
 
 ```bash
 kubectl fleet get deploy -A -o json \
@@ -217,11 +340,6 @@ API server warnings, such as deprecated API versions, print to stderr once
 per context as `warn: <context>: <message>`.
 
 `KUBECONFIG` env var is honoured (colon-separated multi-file lists are merged).
-
-Contexts run in parallel: `--parallelism` defaults to 32, or 16 for `get`,
-which holds a page of decoded objects per in-flight context. If your
-credential plugins prompt interactively (MFA codes, browser SSO), run with
-`--parallelism 1` so the prompts don't interleave.
 
 ## Requirements
 

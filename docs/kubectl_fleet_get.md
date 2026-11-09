@@ -2,22 +2,71 @@
 
 Get a resource across all matching kubeconfig contexts
 
+### Synopsis
+
+Get a resource across every selected context, like kubectl get.
+
+Columns come from each API server, exactly as kubectl shows them,
+including a custom resource's own printer columns. Clusters on different
+versions can render different columns; they are merged by name and a
+cluster leaves blank what it lacks. --server-print=false uses the plugin's
+built-in columns, which are also the fallback for an API that cannot
+render tables.
+
+Without -n or -A each context is queried in its own namespace (default
+"default"). get KIND NAME skips contexts that don't have the object and
+fails only when none do; with -A it finds the name in every namespace.
+
+--problems keeps only unhealthy rows, judged from the STATUS and READY
+columns of any kind: a STATUS other than Running, Completed, Ready, Bound
+and similar, or READY short of its target (1/2). Finished Job pods and
+cordoned nodes count as healthy.
+
+-o json|yaml prints a v1 List of full objects, each annotated with
+kubectl-fleet/context; it streams as clusters answer.
+
 ```
-kubectl fleet get <kind> [name] [flags]
+kubectl fleet get KIND [NAME] [flags]
+```
+
+### Examples
+
+```
+  # Pods in each context's own namespace
+  kubectl fleet get pods
+
+  # Deployments in one namespace on production clusters
+  kubectl fleet get deploy -n payments --contexts '^prod-'
+
+  # Only unhealthy pods, fleet-wide
+  kubectl fleet get pods -A --problems
+
+  # Where does the api deployment run, in any namespace?
+  kubectl fleet get deploy api -A
+
+  # Argo CD applications with their sync and health columns
+  kubectl fleet get applications -A
+
+  # Scripting: one context/namespace/name per line
+  kubectl fleet get pods -A -l app=api -o name
 ```
 
 ### Options
 
 ```
-  -A, --all-namespaces    query across all namespaces
-      --contexts string   regex applied to context names
-  -h, --help              help for get
-      --no-headers        suppress header row in table/wide output
-  -o, --output string     output format: table|wide|json|yaml|name (default "table")
-      --parallelism int   max parallel cluster calls (0=unbounded); each in-flight context holds a page of up to 500 decoded objects (default 16)
-  -l, --selector string   label selector
-      --server-print      let each API server render the table columns, as kubectl does; false uses built-in columns (default true)
-      --strict            exit non-zero if any context failed
+  -A, --all-namespaces      query across all namespaces
+      --contexts string     regex selecting kubeconfig contexts by name (default: all)
+      --errors              show each failed context: an <error> row with its ERROR text, and one warning line per failure (default: a one-line summary)
+      --exclude string      regex of context names to leave out, applied after --contexts
+  -h, --help                help for get
+      --no-headers          suppress header row in table/wide output
+  -o, --output string       output format: table|wide|json|yaml|name (default "table")
+      --parallelism int     max contexts queried at once (0=unbounded); each in-flight context holds a page of up to 500 decoded objects (default 16)
+      --problems            show only unhealthy rows: STATUS not healthy (Running, Completed, Ready, Bound…) or READY short (1/2)
+  -l, --selector string     label selector
+      --server-print        let each API server render the table columns, as kubectl does; false uses built-in columns (default true)
+      --strict              exit non-zero if any context failed
+      --where stringArray   filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
 ```
 
 ### Options inherited from parent commands

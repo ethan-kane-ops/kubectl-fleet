@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,38 +16,44 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/where"
 )
 
 func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		filter      string
-		parallelism int
-		outputFlag  string
-		since       time.Duration
-		noHeaders   bool
-		strict      bool
+		o            fleetOptions
+		since        time.Duration
+		problemsOnly bool
+		sortBy       string
+		top          int
 	)
 	c := &cobra.Command{
-		Use:   "status",
-		Short: "Per-cluster health summary across kubeconfig contexts",
+		Use:     "status",
+		Short:   "Per-cluster health summary across kubeconfig contexts",
+		Long:    statusLong,
+		Example: statusExample,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			f, err := output.ParseFormat(outputFlag)
+			f, err := o.format()
 			if err != nil {
 				return err
+			}
+			if !slices.Contains(statusSortKeys, sortBy) && sortBy != "" {
+				return fmt.Errorf("--sort-by must be one of: %s", strings.Join(statusSortKeys, ", "))
+			}
+			if top < 0 {
+				return fmt.Errorf("--top must be 0 or more")
 			}
 			cfg, err := kubeconfig.Load(kubeFlags)
 			if err != nil {
 				return err
 			}
-			refs, err := kubeconfig.Select(kubeFlags, cfg, filter)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
 			if err != nil {
 				return err
 			}
-			if len(refs) == 0 {
-				return fmt.Errorf("no matching contexts")
-			}
+			refs := sel.refs
 			opts := health.Options{Since: since}
-			results := fleet.Run(cmd.Context(), refs, parallelism,
+			results := fleet.Run(cmd.Context(), refs, o.parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (health.Summary, error) {
 					return statusOne(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), opts)
 				})
@@ -55,24 +63,57 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				headers = append(headers, "RESTARTS_"+shortDuration(since))
 			}
 			wideHeaders := []string{"FAILED", "TOTAL_PODS", "TOP_NOISY", "ERROR"}
-			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: noHeaders}
+			tbl := &output.Table{Headers: headers, WideHeaders: wideHeaders, NoHeaders: o.noHeaders}
 
-			records := make([]statusRecord, 0, len(results))
+			// Healthy clusters are filtered, sorted and trimmed; failed ones
+			// are reported separately (summary, or rows with --errors) and
+			// always kept as JSON error records after them.
+			var ok []contextSummary
+			failures := append([]fleet.Failure(nil), sel.failures...)
 			for _, res := range results {
 				if res.Err != nil {
-					records = append(records, statusRecord{Context: res.Context, Error: res.Err.Error()})
-					row := []string{res.Context, "?", "?", "?", "?", "?"}
-					if since > 0 {
-						row = append(row, "?")
-					}
-					tbl.Append(row, []string{"?", "?", "", res.Err.Error()})
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
+					failures = append(failures, fleet.Failure{Context: res.Context, Err: res.Err})
 					continue
 				}
-				s := res.Value
-				records = append(records, statusRecord{Context: res.Context, Summary: &s})
+				if !problemsOnly || problemCluster(res.Value) {
+					ok = append(ok, contextSummary{context: res.Context, summary: res.Value})
+				}
+			}
+			sortSummaries(ok, sortBy)
+			if top > 0 && len(ok) > top {
+				ok = ok[:top]
+			}
+			sort.Slice(failures, func(i, j int) bool { return failures[i].Context < failures[j].Context })
+			entries := make([]statusEntry, 0, len(ok)+len(failures))
+			for _, cs := range ok {
+				entries = append(entries, statusEntry{context: cs.context, summary: cs.summary})
+			}
+			for _, fl := range failures {
+				entries = append(entries, statusEntry{context: fl.Context, err: fl.Err})
+			}
+			// By name (the default), failed contexts sit in name order among
+			// the rest, as before; by a size or version key they follow.
+			if sortBy == "" || sortBy == "context" {
+				sort.SliceStable(entries, func(i, j int) bool { return entries[i].context < entries[j].context })
+			}
+
+			records := make([]statusRecord, 0, len(entries))
+			for _, e := range entries {
+				if e.err != nil {
+					records = append(records, statusRecord{Context: e.context, Error: e.err.Error()})
+					if o.errors {
+						row := []string{e.context, "?", "?", "?", "?", "?"}
+						if since > 0 {
+							row = append(row, "?")
+						}
+						tbl.Append(row, []string{"?", "?", "", e.err.Error()})
+					}
+					continue
+				}
+				s := e.summary
+				records = append(records, statusRecord{Context: e.context, Summary: &s})
 				row := []string{
-					res.Context,
+					e.context,
 					s.ServerVersion,
 					fmt.Sprintf("%d/%d", s.NodesReady, s.NodesTotal),
 					fmt.Sprintf("%d", s.PodsRunning),
@@ -89,6 +130,9 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					"",
 				})
 			}
+			if o.errors {
+				promoteErrorColumn(tbl)
+			}
 			if f.Structured() {
 				err = output.Encode(cmd.OutOrStdout(), records, f)
 			} else {
@@ -97,21 +141,60 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if strict {
-				if n := fleet.CountErrors(results); n > 0 {
-					return fmt.Errorf("%d of %d contexts failed", n, len(results))
-				}
-			}
-			return nil
+			return o.finish(cmd.ErrOrStderr(), sel, fleet.Failures(results), len(refs))
 		},
 	}
-	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", defaultParallelism, "max parallel cluster calls (0=unbounded)")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
+	c.Flags().BoolVar(&problemsOnly, "problems", false, "show only clusters with NotReady nodes or Pending, Failed or crashlooping pods")
+	c.Flags().StringVar(&sortBy, "sort-by", "", "order clusters: nodes (total), pods (running) or version, largest first; or context, by name")
+	c.Flags().IntVar(&top, "top", 0, "keep only the first N clusters after sorting (0 = all)")
 	c.Flags().DurationVar(&since, "since", 0, "if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)")
-	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
-	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed")
+	o.addFlags(c, defaultParallelism)
+	o.addErrorsFlag(c)
 	return c
+}
+
+// statusSortKeys are the values --sort-by accepts.
+var statusSortKeys = []string{"nodes", "pods", "version", "context"}
+
+// statusEntry is one row of status output: a summary, or a failure.
+type statusEntry struct {
+	context string
+	summary health.Summary
+	err     error
+}
+
+type contextSummary struct {
+	context string
+	summary health.Summary
+}
+
+// problemCluster reports a cluster with NotReady nodes or Pending, Failed or
+// crashlooping pods.
+func problemCluster(s health.Summary) bool {
+	return s.NodesReady < s.NodesTotal || s.PodsPending+s.PodsFailed+s.PodsCrashLoop > 0
+}
+
+// sortSummaries orders clusters by key: nodes, pods and version largest
+// first, context (and the default, "") by name. Ties fall back to name.
+func sortSummaries(rows []contextSummary, key string) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i].summary, rows[j].summary
+		c := 0
+		switch key {
+		case "nodes":
+			c = b.NodesTotal - a.NodesTotal
+		case "pods":
+			// The PODS column: running pods, so the sorted column reads in
+			// order.
+			c = b.PodsRunning - a.PodsRunning
+		case "version":
+			c = where.CompareServerVersions(b.ServerVersion, a.ServerVersion)
+		}
+		if c != 0 {
+			return c < 0
+		}
+		return rows[i].context < rows[j].context
+	})
 }
 
 // statusRecord is one context's entry in `status -o json|yaml`. A failed

@@ -39,12 +39,12 @@ func TestGetCmdStrictFailsOnClusterError(t *testing.T) {
 }
 
 func TestGetCmdWithoutStrictSucceeds(t *testing.T) {
-	c := newGetCmd(newFlags(tmpKubeconfigUnreachable(t)))
+	c := newGetCmd(newFlags(partialFleet(t)))
 	c.SetOut(&bytes.Buffer{})
 	c.SetErr(&bytes.Buffer{})
 	c.SetArgs([]string{"pods"})
 	if err := c.Execute(); err != nil {
-		t.Fatalf("cluster errors should only land in the table without --strict: %v", err)
+		t.Fatalf("one failed context of two should not fail the command without --strict: %v", err)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestGetNameOutputOmitsFailedContexts(t *testing.T) {
 	if got := stdout.String(); got != "up/default/web\n" {
 		t.Errorf("stdout=%q want only the reachable pod", got)
 	}
-	if !strings.Contains(stderr.String(), "warn: down:") {
+	if !strings.Contains(stderr.String(), "1 of 2 contexts failed") {
 		t.Errorf("stderr should warn about the failed context: %q", stderr.String())
 	}
 }
@@ -302,7 +302,7 @@ func TestGetReportsContextsResolvingAnotherGroup(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"widgets", "--strict"})
+	c.SetArgs([]string{"widgets", "--strict", "--errors"})
 	err := c.Execute()
 	if err == nil || !strings.Contains(err.Error(), "1 of 2 contexts failed") {
 		t.Fatalf("want b counted as failed under --strict, got %v", err)
@@ -330,19 +330,23 @@ func TestBuildGetTableMergesColumnsByName(t *testing.T) {
 			[][]string{{"ns3", "db", "1/1", "3d"}}, [][]string{{"10.0.0.2", "n2"}}),
 		{Context: "d", Err: errors.New("down")},
 	}
-	tbl := buildGetTable("pods", results, output.FormatWide, false)
-	wantHeaders := []string{"CONTEXT", "NAMESPACE", "NAME", "READY", "OWNER", "AGE", "NODE"}
-	wantWide := []string{"IP", "ERROR"}
+	tbl := buildGetTable("pods", results, output.FormatWide, false, true)
+	if hidden := buildGetTable("pods", results, output.FormatWide, false, false); len(hidden.Rows) != 3 {
+		t.Errorf("without --errors the failed context should have no row, got %d rows", len(hidden.Rows))
+	}
+	// --errors (showErrors) moves ERROR into the regular columns.
+	wantHeaders := []string{"CONTEXT", "NAMESPACE", "NAME", "READY", "OWNER", "AGE", "NODE", "ERROR"}
+	wantWide := []string{"IP"}
 	if !reflect.DeepEqual(tbl.Headers, wantHeaders) || !reflect.DeepEqual(tbl.WideHeaders, wantWide) {
 		t.Fatalf("headers=%v wide=%v\nwant %v %v", tbl.Headers, tbl.WideHeaders, wantHeaders, wantWide)
 	}
 	wantRows := [][]string{
-		{"a", "ns1", "web", "1/1", "x", "1d", ""},
-		{"b", "ns2", "api", "0/1", "", "2d", "n1"},
-		{"c", "ns3", "db", "1/1", "", "3d", "n2"},
-		{"d", "", "<error>", "", "", "", ""},
+		{"a", "ns1", "web", "1/1", "x", "1d", "", ""},
+		{"b", "ns2", "api", "0/1", "", "2d", "n1", ""},
+		{"c", "ns3", "db", "1/1", "", "3d", "n2", ""},
+		{"d", "", "<error>", "", "", "", "", "down"},
 	}
-	wantWideRows := [][]string{{"10.0.0.9", ""}, {"10.0.0.1", ""}, {"10.0.0.2", ""}, {"", "down"}}
+	wantWideRows := [][]string{{"10.0.0.9"}, {"10.0.0.1"}, {"10.0.0.2"}, {""}}
 	if !reflect.DeepEqual(tbl.Rows, wantRows) {
 		t.Errorf("rows=%v\nwant %v", tbl.Rows, wantRows)
 	}

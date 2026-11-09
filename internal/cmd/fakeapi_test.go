@@ -28,6 +28,22 @@ type fakeCluster struct {
 	// extraColumn adds a column with that name, cell value "x", before Age.
 	noTables    bool
 	extraColumn string
+	// gitVersion is what /version reports (default v1.31.0); nodes is the
+	// node count, served as Ready nodes named node-0..node-N-1.
+	gitVersion    string
+	nodes         int
+	notReadyNodes int // the last notReadyNodes of nodes report Ready=False
+	// podStatus overrides a pod's table STATUS by name; such a pod also
+	// reports READY 0/1.
+	podStatus map[string]string
+	// kubelet is every node's kubelet version (default v1.31.0);
+	// systemDeployments and systemDaemonSets map kube-system workload names
+	// to their first container image.
+	kubelet           string
+	systemDeployments map[string]string
+	systemDaemonSets  map[string]string
+	// forbidden paths answer 403 Forbidden, as without RBAC.
+	forbidden map[string]bool
 
 	mu       sync.Mutex
 	requests []string
@@ -39,7 +55,10 @@ type fakePod struct{ namespace, name string }
 func (f *fakeCluster) start(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		srv.CloseClientConnections()
+		srv.Close()
+	})
 	return srv.URL
 }
 
@@ -64,13 +83,28 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	f.accept[r.URL.Path] = r.Header.Get("Accept")
 	f.mu.Unlock()
 	if f.delay > 0 {
-		time.Sleep(f.delay)
+		// End early when the client gives up, so test cleanup doesn't wait.
+		select {
+		case <-time.After(f.delay):
+		case <-r.Context().Done():
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	p := r.URL.Path
+	if f.forbidden[p] {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]any{"kind": "Status", "apiVersion": "v1", "status": "Failure", "reason": "Forbidden", "code": 403,
+			"message": "forbidden: " + p, "metadata": map[string]any{}})
+		return
+	}
 	switch {
 	case p == "/version":
-		writeJSON(w, map[string]string{"gitVersion": "v1.31.0"})
+		v := f.gitVersion
+		if v == "" {
+			v = "v1.31.0"
+		}
+		writeJSON(w, map[string]string{"gitVersion": v})
 	case p == "/api":
 		writeJSON(w, map[string]any{"kind": "APIVersions", "versions": []string{"v1"}})
 	case p == "/apis":
@@ -96,7 +130,11 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	case p == "/api/v1/nodes":
-		writeJSON(w, map[string]any{"kind": "NodeList", "apiVersion": "v1", "metadata": map[string]any{}, "items": []any{}})
+		f.listNodes(w, r)
+	case p == "/apis/apps/v1/namespaces/kube-system/deployments":
+		writeJSON(w, workloadList("DeploymentList", "Deployment", f.systemDeployments))
+	case p == "/apis/apps/v1/namespaces/kube-system/daemonsets":
+		writeJSON(w, workloadList("DaemonSetList", "DaemonSet", f.systemDaemonSets))
 	case p == "/api/v1/pods":
 		f.listPods(w, r, "")
 	case strings.HasPrefix(p, "/api/v1/namespaces/"):
@@ -142,6 +180,54 @@ func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string
 	writeJSON(w, map[string]any{"kind": "PodList", "apiVersion": "v1", "metadata": meta, "items": items})
 }
 
+// workloadList renders kube-system workloads with one container each.
+func workloadList(listKind, kind string, images map[string]string) map[string]any {
+	items := []any{}
+	for name, image := range images {
+		items = append(items, map[string]any{
+			"kind": kind, "apiVersion": "apps/v1",
+			"metadata": map[string]any{"name": name, "namespace": "kube-system"},
+			"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
+				"containers": []any{map[string]any{"name": name, "image": image}},
+			}}},
+		})
+	}
+	return map[string]any{"kind": listKind, "apiVersion": "apps/v1", "metadata": map[string]any{}, "items": items}
+}
+
+// listNodes serves nodes as a full NodeList, or as a metadata-only
+// PartialObjectMetadataList when the client asks for one.
+func (f *fakeCluster) listNodes(w http.ResponseWriter, r *http.Request) {
+	metaOnly := strings.Contains(r.Header.Get("Accept"), "as=PartialObjectMetadataList")
+	items := make([]any, 0, f.nodes)
+	for i := range f.nodes {
+		meta := map[string]any{"name": fmt.Sprintf("node-%d", i)}
+		if metaOnly {
+			items = append(items, map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": meta})
+			continue
+		}
+		ready := "True"
+		if i >= f.nodes-f.notReadyNodes {
+			ready = "False"
+		}
+		kubelet := f.kubelet
+		if kubelet == "" {
+			kubelet = "v1.31.0"
+		}
+		items = append(items, map[string]any{"kind": "Node", "apiVersion": "v1", "metadata": meta,
+			"status": map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": ready}},
+				"nodeInfo": map[string]any{"kubeletVersion": kubelet, "osImage": "Debian GNU/Linux 12 (bookworm)",
+					"kernelVersion": "6.10.14", "containerRuntimeVersion": "containerd://2.1.1", "architecture": "arm64"},
+			}})
+	}
+	if metaOnly {
+		writeJSON(w, map[string]any{"kind": "PartialObjectMetadataList", "apiVersion": "meta.k8s.io/v1", "metadata": map[string]any{}, "items": items})
+		return
+	}
+	writeJSON(w, map[string]any{"kind": "NodeList", "apiVersion": "v1", "metadata": map[string]any{}, "items": items})
+}
+
 func (f *fakeCluster) wantsTable(r *http.Request) bool {
 	return !f.noTables && strings.Contains(r.Header.Get("Accept"), "as=Table")
 }
@@ -155,7 +241,11 @@ func (f *fakeCluster) podTable(meta map[string]any, pods []fakePod) map[string]a
 	cols = append(cols, map[string]any{"name": "Age", "priority": 0}, map[string]any{"name": "IP", "priority": 1}, map[string]any{"name": "Node", "priority": 1})
 	rows := make([]any, 0, len(pods))
 	for _, p := range pods {
-		cells := []any{p.name, "1/1", "Running", 3}
+		ready, status := "1/1", "Running"
+		if st, ok := f.podStatus[p.name]; ok {
+			ready, status = "0/1", st
+		}
+		cells := []any{p.name, ready, status, 3}
 		if f.extraColumn != "" {
 			cells = append(cells, "x")
 		}

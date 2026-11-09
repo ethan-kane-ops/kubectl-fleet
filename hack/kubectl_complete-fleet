@@ -1,0 +1,6 @@
+#!/bin/sh
+# Completion shim for `kubectl fleet <TAB>`. kubectl (1.26+) runs an
+# executable named kubectl_complete-<plugin> found on PATH and expects
+# cobra's completion protocol on stdout, which kubectl-fleet's hidden
+# __complete command speaks. Install it next to kubectl-fleet.
+exec kubectl-fleet __complete "$@"

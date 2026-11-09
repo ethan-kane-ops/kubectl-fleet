@@ -32,6 +32,8 @@ func NewRootCmd() *cobra.Command {
 		// own tab-completion instead of scoping to this plugin.
 		Use:           "kubectl-fleet",
 		Short:         "Multi-cluster operational awareness for K8s fleets",
+		Long:          rootLong,
+		Example:       rootExample,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
@@ -52,6 +54,7 @@ func NewRootCmd() *cobra.Command {
 		newStatusCmd(kubeFlags),
 		newVersionCmd(kubeFlags),
 	)
+	registerCompletions(root, kubeFlags)
 
 	return root
 }

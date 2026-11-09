@@ -16,28 +16,31 @@ import (
 
 func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		clientOnly  bool
-		filter      string
-		parallelism int
-		outputFlag  string
-		noHeaders   bool
-		strict      bool
+		o          fleetOptions
+		clientOnly bool
+		detailed   bool
+		perCluster bool
 	)
 	c := &cobra.Command{
-		Use:   "version",
-		Short: "Print plugin and per-cluster Kubernetes server versions",
+		Use:     "version",
+		Short:   "Print plugin and per-cluster Kubernetes server versions",
+		Long:    versionLong,
+		Example: versionExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f, err := output.ParseFormat(outputFlag)
+			f, err := o.format()
 			if err != nil {
 				return err
 			}
 			tbl := &output.Table{
 				Headers:     []string{"CONTEXT", "COMPONENT", "VERSION"},
 				WideHeaders: []string{"GIT_COMMIT", "BUILD_DATE", "PLATFORM", "ERROR"},
-				NoHeaders:   noHeaders,
+				NoHeaders:   o.noHeaders,
 			}
 			tbl.Append(clientRow())
 
+			if perCluster && !detailed {
+				return fmt.Errorf("--per-cluster needs --detailed")
+			}
 			if clientOnly {
 				return output.Print(cmd.OutOrStdout(), tbl, f)
 			}
@@ -46,26 +49,28 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			refs, err := kubeconfig.Select(kubeFlags, cfg, filter)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
 			if err != nil {
 				return err
 			}
-			if len(refs) == 0 {
-				return fmt.Errorf("no matching contexts")
+			refs := sel.refs
+			if detailed {
+				return versionDetailed(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), &o, kubeFlags, cfg, sel, f, perCluster)
 			}
 
-			results := fleet.Run(cmd.Context(), refs, parallelism,
+			results := fleet.Run(cmd.Context(), refs, o.parallelism,
 				func(ctx context.Context, r kubeconfig.ContextRef) (*version.Info, error) {
 					return probeServerVersion(kubeconfig.ForContext(kubeFlags, cfg, r.Name))
 				})
 
 			for _, res := range results {
 				if res.Err != nil {
-					tbl.Append(
-						[]string{res.Context, "k8s-server", "<error>"},
-						[]string{"", "", "", res.Err.Error()},
-					)
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: %s: %v\n", res.Context, res.Err)
+					if o.errors {
+						tbl.Append(
+							[]string{res.Context, "k8s-server", "<error>"},
+							[]string{"", "", "", res.Err.Error()},
+						)
+					}
 					continue
 				}
 				v := res.Value
@@ -74,23 +79,21 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					[]string{v.GitCommit, v.BuildDate, v.Platform, ""},
 				)
 			}
+			if o.errors {
+				promoteErrorColumn(tbl)
+			}
 			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
 				return err
 			}
-			if strict {
-				if n := fleet.CountErrors(results); n > 0 {
-					return fmt.Errorf("%d of %d contexts failed", n, len(results))
-				}
-			}
-			return nil
+			return o.finish(cmd.ErrOrStderr(), sel, fleet.Failures(results), len(refs))
 		},
 	}
 	c.Flags().BoolVar(&clientOnly, "client", false, "show client version only, skip cluster probes")
-	c.Flags().StringVar(&filter, "contexts", "", "regex applied to context names")
-	c.Flags().IntVar(&parallelism, "parallelism", defaultParallelism, "max parallel cluster calls (0=unbounded)")
-	c.Flags().StringVarP(&outputFlag, "output", "o", "table", "output format: table|wide|json|yaml|name")
-	c.Flags().BoolVar(&noHeaders, "no-headers", false, "suppress header row in table/wide output")
-	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if any context failed (ignored with --client)")
+	c.Flags().BoolVar(&detailed, "detailed", false, "also report kubelet, node OS, kernel, container runtime, architecture and kube-system component versions; by default as a fleet-wide spread")
+	c.Flags().BoolVar(&perCluster, "per-cluster", false, "with --detailed, one row per context and component instead of the fleet-wide spread")
+	o.addFlags(c, defaultParallelism)
+	o.addErrorsFlag(c)
+	c.Flags().Lookup("strict").Usage = "exit non-zero if any context failed (ignored with --client)"
 	return c
 }
 

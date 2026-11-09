@@ -2,21 +2,51 @@
 
 List kubeconfig contexts, with optional reachability probe
 
+### Synopsis
+
+List kubeconfig contexts, optionally probing each one's API server.
+
+Without --check this only reads your kubeconfig. --check calls /version on
+every context (each with its own --timeout) and adds REACHABLE, VERSION,
+LATENCY and ERROR columns. Unlike the other commands, contexts keeps a row
+for every context it could not reach, since reachability is its subject.
+
+--where works here too, and only here accepts '!reachable', to list the
+contexts that are down along with why.
+
 ```
 kubectl fleet contexts [flags]
+```
+
+### Examples
+
+```
+  # Every context in the kubeconfig
+  kubectl fleet contexts
+
+  # Probe reachability, 2 seconds per context
+  kubectl fleet contexts --check --timeout 2s
+
+  # Just the ones that are down, with the cause
+  kubectl fleet contexts --where '!reachable'
+
+  # CI gate: fail if any production context is unreachable
+  kubectl fleet contexts --contexts '^prod-' --check --strict
 ```
 
 ### Options
 
 ```
-      --check              probe each context's /version endpoint
-      --filter string      regex applied to context names
-  -h, --help               help for contexts
-      --no-headers         suppress header row in table/wide output
-  -o, --output string      output format: table|wide|json|yaml|name (default "table")
-      --parallelism int    max parallel probes (0=unbounded) (default 32)
-      --strict             exit non-zero if any probed context is unreachable (requires --check)
-      --timeout duration   per-context probe timeout (default 5s)
+      --check               probe each context's /version endpoint
+      --contexts string     regex selecting kubeconfig contexts by name (default: all)
+      --exclude string      regex of context names to leave out, applied after --contexts
+  -h, --help                help for contexts
+      --no-headers          suppress header row in table/wide output
+  -o, --output string       output format: table|wide|json|yaml|name (default "table")
+      --parallelism int     max contexts probed at once (0=unbounded) (default 32)
+      --strict              exit non-zero if any probed context is unreachable (requires --check)
+      --timeout duration    per-context probe timeout (default 5s)
+      --where stringArray   filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
 ```
 
 ### Options inherited from parent commands

@@ -44,11 +44,16 @@ clean:
 install:
     go install ./cmd/kubectl-fleet
     mise reshim 2>/dev/null || true
-    @echo "installed → $(which kubectl-fleet 2>/dev/null || go env GOBIN)/kubectl-fleet"
+    install -m 0755 hack/kubectl_complete-fleet "$(dirname "$(command -v kubectl-fleet)")/kubectl_complete-fleet"
+    @echo "installed → $(command -v kubectl-fleet) (+ kubectl_complete-fleet for kubectl fleet <TAB>)"
 
 # Regenerate command reference docs into ./docs
 docs:
     go run ./cmd/gendocs
+
+# Generate man pages into build/man (release archives ship them)
+man:
+    go run ./cmd/gendocs -man build/man
 
 # Regenerate the README demo gif (requires vhs: https://github.com/charmbracelet/vhs)
 demo:
