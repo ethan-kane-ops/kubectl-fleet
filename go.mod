@@ -5,6 +5,7 @@ go 1.26.11
 require (
 	github.com/go-logr/logr v1.4.2
 	github.com/spf13/cobra v1.8.1
+	go.uber.org/goleak v1.3.0
 	golang.org/x/sync v0.24.0
 	k8s.io/api v0.31.1
 	k8s.io/apimachinery v0.31.1
