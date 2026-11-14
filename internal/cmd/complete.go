@@ -73,7 +73,7 @@ func completionContexts(kubeFlags *genericclioptions.ConfigFlags, o *fleetOption
 	if err != nil {
 		return nil, nil
 	}
-	if (kubeFlags.Context == nil || *kubeFlags.Context == "") && o.contexts == "" && o.exclude == "" {
+	if (kubeFlags.Context == nil || *kubeFlags.Context == "") && len(o.contexts) == 0 && o.exclude == "" {
 		if cfg.CurrentContext == "" {
 			return cfg, nil
 		}
@@ -83,7 +83,11 @@ func completionContexts(kubeFlags *genericclioptions.ConfigFlags, o *fleetOption
 		}
 		return cfg, []kubeconfig.ContextRef{{Name: cfg.CurrentContext, Cluster: ctx.Cluster, Namespace: ctx.Namespace, AuthInfo: ctx.AuthInfo}}
 	}
-	refs, err := kubeconfig.Select(kubeFlags, cfg, o.contexts, o.exclude)
+	include, err := o.include()
+	if err != nil {
+		return cfg, nil
+	}
+	refs, err := kubeconfig.Select(kubeFlags, cfg, include, o.exclude)
 	if err != nil {
 		return cfg, nil
 	}

@@ -103,7 +103,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	o.addFlags(c, defaultParallelism)
 	c.Flags().Lookup("parallelism").Usage = "max contexts probed at once (0=unbounded)"
 	c.Flags().Lookup("strict").Usage = "exit non-zero if any probed context is unreachable (requires --check)"
-	c.Flags().StringVar(&o.contexts, "filter", "", "regex selecting kubeconfig contexts by name")
+	c.Flags().StringArrayVar(&o.contexts, "filter", nil, "regex selecting kubeconfig contexts by name")
 	_ = c.Flags().MarkDeprecated("filter", "use --contexts")
 	return c
 }
@@ -134,7 +134,11 @@ func withFailedRefs(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.
 	for _, f := range sel.failures {
 		keep[f.Context] = true
 	}
-	all, err := kubeconfig.Select(kubeFlags, cfg, o.contexts, o.exclude)
+	include, err := o.include()
+	if err != nil {
+		return nil, err
+	}
+	all, err := kubeconfig.Select(kubeFlags, cfg, include, o.exclude)
 	if err != nil {
 		return nil, err
 	}

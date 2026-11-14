@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -24,7 +26,7 @@ import (
 // fleetOptions holds the flags every fleet command shares, so selection,
 // parallelism and output mean the same thing on each of them.
 type fleetOptions struct {
-	contexts    string
+	contexts    []string
 	exclude     string
 	parallelism int
 	strict      bool
@@ -39,7 +41,7 @@ type fleetOptions struct {
 
 func (o *fleetOptions) addFlags(c *cobra.Command, defaultParallelism int) {
 	f := c.Flags()
-	f.StringVar(&o.contexts, "contexts", "", "regex selecting kubeconfig contexts by name (default: all)")
+	f.StringArrayVar(&o.contexts, "contexts", nil, "regex selecting kubeconfig contexts by name; repeatable, any may match (default: all)")
 	f.StringVar(&o.exclude, "exclude", "", "regex of context names to leave out, applied after --contexts")
 	f.IntVar(&o.parallelism, "parallelism", defaultParallelism, "max contexts queried at once (0=unbounded)")
 	f.BoolVar(&o.strict, "strict", false, "exit non-zero if any context failed")
@@ -69,6 +71,28 @@ func (o *fleetOptions) finish(w io.Writer, sel selection, work []fleet.Failure, 
 		return fmt.Errorf("%d of %d contexts failed", len(failures), total)
 	}
 	return nil
+}
+
+// include combines the --contexts regexes into one: a context matches if it
+// matches any of them. Each is compiled on its own first, so a bad one is
+// named in the error.
+func (o *fleetOptions) include() (string, error) {
+	for _, re := range o.contexts {
+		if _, err := regexp.Compile(re); err != nil {
+			return "", fmt.Errorf("compile --contexts %q: %w", re, err)
+		}
+	}
+	switch len(o.contexts) {
+	case 0:
+		return "", nil
+	case 1:
+		return o.contexts[0], nil
+	}
+	parts := make([]string, len(o.contexts))
+	for i, re := range o.contexts {
+		parts[i] = "(?:" + re + ")"
+	}
+	return strings.Join(parts, "|"), nil
 }
 
 func (o *fleetOptions) format() (output.Format, error) {
@@ -110,7 +134,11 @@ func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericcli
 	if filter.Reachability() == where.UnreachableOnly && !allowUnreachable {
 		return selection{}, fmt.Errorf("--where '!reachable' selects contexts this command cannot query; list them with: kubectl fleet contexts --where '!reachable'")
 	}
-	refs, err := kubeconfig.Select(kubeFlags, cfg, o.contexts, o.exclude)
+	include, err := o.include()
+	if err != nil {
+		return selection{}, err
+	}
+	refs, err := kubeconfig.Select(kubeFlags, cfg, include, o.exclude)
 	if err != nil {
 		return selection{}, err
 	}
