@@ -94,6 +94,7 @@ details summary { cursor: pointer; font-size: 16px; font-weight: 600; margin: 28
 <h2>Fleet overview</h2>
 <table class="overview">
 <tbody>
+<tr><th scope="row">Clusters</th><td>3 (2 reachable)</td></tr>
 <tr><th scope="row">Nodes</th><td>7 of 7 ready</td></tr>
 <tr><th scope="row">Pods</th><td>20 running, 0 pending (0 stuck), 2 crashlooping, 0 failed, 20 total</td></tr>
 <tr><th scope="row">Control planes (clusters)</th><td>v1.30.4-eks-a737599 (2)</td></tr>
@@ -107,10 +108,10 @@ details summary { cursor: pointer; font-size: 16px; font-weight: 600; margin: 28
 <h2>Clusters</h2>
 <div class="scroll">
 <table>
-<thead><tr><th>CONTEXT</th><th>VERSION</th><th>KUBELETS</th><th>NODES</th><th>ZONES</th><th>PODS</th><th>PENDING</th><th>CRASHLOOP</th><th>PROVISIONERS</th></tr></thead>
+<thead><tr><th>CONTEXT</th><th>VERSION</th><th>KUBELETS</th><th>NODES</th><th>ZONES</th><th>PODS</th><th>PENDING</th><th>CRASH</th><th>PROVISIONERS</th></tr></thead>
 <tbody>
-<tr><td>arn:aws:eks:eu-west-1:1:cluster/a|b&lt;c&gt;</td><td>v1.30.4-eks-a737599</td><td>1.29.8-1.30.4</td><td>4/4</td><td>2</td><td>10</td><td>0</td><td>2</td><td>karpenter 3, nodegroup 1</td></tr>
-<tr><td>prod-eu-1</td><td>v1.30.4-eks-a737599</td><td>1.30.4</td><td>3/3</td><td>1</td><td>10</td><td>0</td><td>0</td><td>karpenter 3</td></tr>
+<tr><td>arn:aws:eks:eu-west-1:1:cluster/a|b&lt;c&gt;</td><td>1.30.4</td><td>1.29.8-1.30.4</td><td>4/4</td><td>2</td><td>10</td><td>0</td><td>2</td><td>karpenter 3, nodegroup 1</td></tr>
+<tr><td>prod-eu-1</td><td>1.30.4</td><td>1.30.4</td><td>3/3</td><td>1</td><td>10</td><td>0</td><td>0</td><td>karpenter 3</td></tr>
 <tr><td>prod-us-1</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>failed: connection refused</td></tr>
 </tbody>
 </table>

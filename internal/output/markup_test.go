@@ -67,3 +67,21 @@ func TestMergeWide(t *testing.T) {
 		t.Errorf("MergeWide: %+v", tbl)
 	}
 }
+
+func TestMarkdownCellEscapesEmphasis(t *testing.T) {
+	if got := MarkdownCell("*prod*_a`b"); got != "\\*prod\\*\\_a\\`b" {
+		t.Errorf("MarkdownCell = %q", got)
+	}
+}
+
+func TestMergeWideShortWideRows(t *testing.T) {
+	tbl := &Table{Headers: []string{"A"}, WideHeaders: []string{"B", "C"}}
+	tbl.Rows = [][]string{{"1"}, {"2"}}
+	tbl.WideRows = [][]string{{"x"}}
+	tbl.MergeWide()
+	for i, r := range tbl.Rows {
+		if len(r) != 3 {
+			t.Errorf("row %d has %d cells, want 3: %v", i, len(r), r)
+		}
+	}
+}

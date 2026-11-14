@@ -241,6 +241,7 @@ Selection: contexts ^prod-; expecting version 1.30; pending counts after 5m
   [VERSION]    prod-us-1  kubelets not on 1.30: v1.29.8-eks-a737599(1)
 
 FLEET OVERVIEW
+  Clusters                   3 (2 reachable)
   Nodes                      7 of 7 ready
   Pods                       20 running, 0 pending (0 stuck), 2 crashlooping, 0 failed, 20 total
   Control planes (clusters)  v1.30.4-eks-a737599 (2)
@@ -250,10 +251,10 @@ FLEET OVERVIEW
   Provisioners (nodes)       karpenter/general (6), nodegroup/system (1)
 
 CLUSTERS
-  CONTEXT    VERSION              KUBELETS       NODES  ZONES  PODS  PENDING  CRASHLOOP  PROVISIONERS
-  prod-ap-1  -                    -              -      -      -     -        -          failed: connection refused
-  prod-eu-1  v1.30.4-eks-a737599  1.30.4         3/3    1      10    0        0          karpenter 3
-  prod-us-1  v1.30.4-eks-a737599  1.29.8-1.30.4  4/4    2      10    0        2          karpenter 3, nodegroup 1
+  CONTEXT    VERSION  KUBELETS       NODES  ZONES  PODS  PENDING  CRASH  PROVISIONERS
+  prod-ap-1  -        -              -      -      -     -        -      failed: connection refused
+  prod-eu-1  1.30.4   1.30.4         3/3    1      10    0        0      karpenter 3
+  prod-us-1  1.30.4   1.29.8-1.30.4  4/4    2      10    0        2      karpenter 3, nodegroup 1
 ```
 
 ```bash

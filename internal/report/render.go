@@ -11,6 +11,7 @@ import (
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/inventory"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/where"
 )
 
 // FormatText is the report's plain-text form: aligned, ASCII only, pasteable
@@ -70,7 +71,7 @@ func newView(r Report) view {
 		Generated:      r.GeneratedAt.UTC().Format("2006-01-02 15:04 UTC"),
 		Selection:      selectionText(r.Selection),
 		Clusters:       fmt.Sprintf("%d clusters (%d reachable)", r.Summary.Clusters, r.Summary.Reachable),
-		ClusterHeaders: []string{"CONTEXT", "VERSION", "KUBELETS", "NODES", "ZONES", "PODS", "PENDING", "CRASHLOOP", "PROVISIONERS"},
+		ClusterHeaders: []string{"CONTEXT", "VERSION", "KUBELETS", "NODES", "ZONES", "PODS", "PENDING", "CRASH", "PROVISIONERS"},
 		CompHeaders:    []string{"COMPONENT", "VERSION", "CLUSTERS"},
 	}
 	n := 0
@@ -92,6 +93,7 @@ func newView(r Report) view {
 
 	s := r.Summary
 	v.Overview = [][2]string{
+		{"Clusters", fmt.Sprintf("%d (%d reachable)", s.Clusters, s.Reachable)},
 		{"Nodes", fmt.Sprintf("%d of %d ready", s.NodesReady, s.NodesTotal)},
 		{"Pods", fmt.Sprintf("%d running, %d pending (%d stuck), %d crashlooping, %d failed, %d total",
 			s.PodsRunning, s.PodsPending, s.PodsStuckPending, s.PodsCrashLoop, s.PodsFailed, s.PodsTotal)},
@@ -109,7 +111,7 @@ func newView(r Report) view {
 		}
 		row := []string{
 			c.Context,
-			c.ControlPlane,
+			where.ShortVersion(c.ControlPlane),
 			KubeletRange(c.Kubelets),
 			fmt.Sprintf("%d/%d", c.NodesReady, c.NodesTotal),
 			"-",
@@ -256,11 +258,11 @@ func renderMarkdown(w io.Writer, v view) error {
 	var b strings.Builder
 	b.WriteString("# Fleet report\n\n")
 	fmt.Fprintf(&b, "Generated %s. %s.\n\n", v.Generated, v.Clusters)
-	fmt.Fprintf(&b, "Selection: %s.\n\n", mdText(v.Selection))
+	fmt.Fprintf(&b, "Selection: %s.\n\n", output.MarkdownCell(v.Selection))
 
 	fmt.Fprintf(&b, "## %s\n\n", v.Verdict)
 	for _, i := range v.Items {
-		fmt.Fprintf(&b, "- **%s** `%s`: %s\n", i.Label, strings.ReplaceAll(i.Context, "`", "'"), mdText(i.Message))
+		fmt.Fprintf(&b, "- **%s** `%s`: %s\n", i.Label, strings.ReplaceAll(i.Context, "`", "'"), output.MarkdownCell(i.Message))
 	}
 	if len(v.Items) > 0 {
 		b.WriteString("\n")
@@ -283,12 +285,6 @@ func renderMarkdown(w io.Writer, v view) error {
 	return err
 }
 
-// mdText escapes the characters that would turn plain text into Markdown
-// markup.
-func mdText(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, "*", `\*`, "_", `\_`, "`", "\\`", "<", "&lt;", ">", "&gt;", "|", `\|`)
-	return r.Replace(s)
-}
 
 func mdTable(b *strings.Builder, headers []string, rows [][]string) {
 	t := &output.Table{Headers: headers}
