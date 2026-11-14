@@ -56,6 +56,9 @@ func registerCompletions(root *cobra.Command, kubeFlags *genericclioptions.Confi
 			if c.Flags().Lookup(name) == nil {
 				continue
 			}
+			if name == "output" && c.Name() == "report" {
+				values = reportFormats
+			}
 			directive := noFiles
 			if name == "where" {
 				// version< and friends need a value typed after them.

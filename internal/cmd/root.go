@@ -51,6 +51,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(
 		newContextsCmd(kubeFlags),
 		newGetCmd(kubeFlags),
+		newReportCmd(kubeFlags),
 		newStatusCmd(kubeFlags),
 		newVersionCmd(kubeFlags),
 	)

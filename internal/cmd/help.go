@@ -13,7 +13,8 @@ cause, and --strict turns them into a non-zero exit. When every context
 fails the command exits non-zero regardless.
 
 Choosing clusters (on every command):
-  --contexts REGEX     contexts whose name matches (default: all)
+  --contexts REGEX     contexts whose name matches; repeatable, any may match
+                       (default: all)
   --exclude REGEX      leave out matching names, applied after --contexts
   --context NAME       exactly one context, overriding both
   --where EXPR         filter by live attributes, repeatable, all must match:
@@ -156,3 +157,39 @@ const versionExample = `  # Control-plane version of every cluster
 
   # Only the plugin's own version
   kubectl fleet version --client`
+
+const reportLong = `Write one shareable report on the selected clusters: a verdict, the
+items that need attention, a fleet overview and a row per cluster.
+
+The report collects, per cluster, the control-plane and kubelet versions,
+nodes ready/total, zones, instance types, how nodes are provisioned
+(Karpenter NodePool, EKS node group or other), pods running, pending and
+crashlooping, and the kube-system component versions. That is one node
+list and one pod list per cluster.
+
+Needs attention lists, most severe first: contexts that failed (including
+those --where reachable skipped), clusters whose nodes or pods could not be
+listed, NotReady nodes, crashlooping pods, pods Pending longer than
+--pending-for, and, with --expect-version, control planes or kubelets on
+another version. Partial kube-system data is listed as information only.
+
+Formats: text (default; paste into a chat message as a code block),
+markdown, html (one self-contained page), json and yaml (for scripts).
+Failures appear as a short cause such as "timed out"; server addresses and
+raw errors never reach the report. Context, namespace, node pool and node
+group names, zones and instance types do.
+
+Exit codes: 0 all clear, 2 the report lists something that needs attention,
+1 no report was written (bad flags, unreadable kubeconfig, no contexts).`
+
+const reportExample = `  # Are the production clusters healthy?
+  kubectl fleet report --contexts '^prod-eu' --contexts '^prod-us'
+
+  # Is every cluster on 1.30? Share it as a web page
+  kubectl fleet report --expect-version 1.30 -o html > fleet.html
+
+  # Markdown for a ticket or a wiki page
+  kubectl fleet report --contexts '^prod-' -o markdown > fleet.md
+
+  # In a script: alert only when something needs attention
+  kubectl fleet report -o json > fleet.json || [ $? -eq 2 ] && notify fleet.json`
