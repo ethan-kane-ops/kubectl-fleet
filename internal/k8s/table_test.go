@@ -1,9 +1,17 @@
 package k8s
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestDecodeTable(t *testing.T) {
@@ -45,5 +53,28 @@ func TestDecodeTable(t *testing.T) {
 				t.Errorf("got %+v\nwant %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTablesWithoutObjects(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("includeObject"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"kind":"Table","apiVersion":"meta.k8s.io/v1","metadata":{},"columnDefinitions":[{"name":"Name"}],"rows":[{"cells":["a"]}]}`))
+	}))
+	defer srv.Close()
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	tables, err := NewTables(&rest.Config{Host: srv.URL}, gvr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tb := range []*Tables{tables, tables.WithoutObjects()} {
+		if err := tb.List(context.Background(), "", metav1.ListOptions{}, func(*Table) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Join(queries, ",") != "Metadata,None" {
+		t.Errorf("includeObject sent %v, want Metadata then None", queries)
 	}
 }
