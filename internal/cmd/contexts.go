@@ -31,6 +31,10 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if o.unreachableOnly && len(o.versions) > 0 {
+				// A cluster that cannot be reached reports no version.
+				return fmt.Errorf("--version cannot be combined with --unreachable")
+			}
 			cfg, err := kubeconfig.Load(kubeFlags)
 			if err != nil {
 				return err

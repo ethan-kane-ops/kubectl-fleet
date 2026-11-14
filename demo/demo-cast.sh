@@ -62,7 +62,7 @@ note "Three kind clusters, three real kubeconfig contexts."
 note "Nothing here is merged ahead of time."
 echo
 
-run "$BIN contexts --filter '$CONTEXT_RE' --check"
+run "$BIN contexts --contexts '$CONTEXT_RE' --check"
 
 note "Reachability is a live probe of each API server, not a cached list."
 sleep 0.8
