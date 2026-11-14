@@ -23,6 +23,7 @@ func fixtureReport() Report {
 	sick.NodesTotal, sick.NodesReady = 4, 4
 	sick.Kubelets = []inventory.Count{{Value: "v1.30.4-eks-a737599", N: 3}, {Value: "v1.29.8-eks-a737599", N: 1}}
 	sick.Zones = []inventory.Count{{Value: "eu-west-1a", N: 2}, {Value: "eu-west-1b", N: 2}}
+	sick.InstanceTypes = []inventory.Count{{Value: "m7g.large", N: 3}, {Value: "unknown", N: 1}}
 	sick.Provisioners = []Provisioner{{Kind: "karpenter", Name: "general", Nodes: 3}, {Kind: "nodegroup", Name: "system", Nodes: 1}}
 	sick.PodsCrashLoop, sick.CrashLoopNS = 2, []health.NamespaceNoise{{Namespace: "payments", Unhealthy: 2}}
 	sick.Components = []inventory.Component{{Name: "coredns", Kind: "Deployment", Version: "v1.11.1"}}
@@ -94,6 +95,30 @@ func TestRenderRejectsTable(t *testing.T) {
 	for _, f := range []output.Format{output.FormatTable, output.FormatWide, output.FormatName} {
 		if err := Render(&bytes.Buffer{}, fixtureReport(), f); err == nil || !strings.Contains(err.Error(), "text|markdown|html|json|yaml") {
 			t.Errorf("%s: want an error listing valid formats, got %v", f, err)
+		}
+	}
+}
+
+func TestViewRowsForEmptyAndForbidden(t *testing.T) {
+	empty := &Cluster{ControlPlane: "v1.30.4"}
+	noNodes := healthy("v1.30.4")
+	noNodes.NodesForbidden = true
+	noNodes.NodesReady, noNodes.NodesTotal, noNodes.Kubelets, noNodes.Zones = 0, 0, nil, nil
+	noPods := healthy("v1.30.4")
+	noPods.PodsForbidden = true
+	noPods.PodsRunning = 0
+	v := newView(Build(t0, Selection{PendingFor: "5m"}, []Result{
+		{Context: "a-empty", Cluster: empty}, {Context: "b-nonodes", Cluster: noNodes}, {Context: "c-nopods", Cluster: noPods},
+	}))
+	// CONTEXT VERSION KUBELETS NODES ZONES PODS PENDING CRASHLOOP PROVISIONERS
+	want := [][]string{
+		{"a-empty", "v1.30.4", "-", "0/0", "-", "0", "0", "0", "-"},
+		{"b-nonodes", "v1.30.4", "-", "-", "-", "10", "0", "0", "-"},
+		{"c-nopods", "v1.30.4", "1.30.4", "3/3", "1", "-", "-", "-", "karpenter 3"},
+	}
+	for i, w := range want {
+		if strings.Join(v.ClusterRows[i], ",") != strings.Join(w, ",") {
+			t.Errorf("row %d = %v, want %v", i, v.ClusterRows[i], w)
 		}
 	}
 }

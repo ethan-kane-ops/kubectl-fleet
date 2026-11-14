@@ -106,7 +106,30 @@ func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.Disco
 		return c, err
 	}
 	c.Components, c.Partial = comps, partial
+	nonNil(&c)
 	return c, nil
+}
+
+// nonNil sets every list that is still nil to empty, so -o json shows []
+// rather than null whether a list was empty or could not be read.
+func nonNil(c *Cluster) {
+	for _, l := range []*[]inventory.Count{&c.Kubelets, &c.Zones, &c.InstanceTypes} {
+		if *l == nil {
+			*l = []inventory.Count{}
+		}
+	}
+	if c.Provisioners == nil {
+		c.Provisioners = []Provisioner{}
+	}
+	if c.CrashLoopNS == nil {
+		c.CrashLoopNS = []health.NamespaceNoise{}
+	}
+	if c.StuckPendingNS == nil {
+		c.StuckPendingNS = []health.NamespaceNoise{}
+	}
+	if c.Components == nil {
+		c.Components = []inventory.Component{}
+	}
 }
 
 func collectNodes(ctx context.Context, cs kubernetes.Interface, c *Cluster) (forbidden bool, err error) {

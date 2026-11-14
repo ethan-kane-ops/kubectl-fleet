@@ -154,3 +154,19 @@ func TestReportWhereReachableKeepsSkipped(t *testing.T) {
 		t.Errorf("skipped context must appear in the report:\n%s", stdout)
 	}
 }
+
+func TestReportWhereReachableAllSkipped(t *testing.T) {
+	stdout, _, err := runReport(t, tmpKubeconfigUnreachable(t), "--where", "reachable")
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit %d (%v), want 2 with a written report", code, err)
+	}
+	if !strings.Contains(stdout, "unreachable (skipped by --where reachable)") {
+		t.Errorf("all-skipped report must list the skipped contexts:\n%s", stdout)
+	}
+}
+
+func TestReportHelpAlertRecipe(t *testing.T) {
+	if strings.Contains(reportExample, "|| [ $? -eq 2 ] &&") {
+		t.Error("the alert recipe notifies on exit 0; use '; [ $? -eq 2 ] &&'")
+	}
+}
