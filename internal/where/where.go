@@ -128,7 +128,7 @@ func (f Filter) Reachability() Reach { return f.reach }
 // term.
 func (f Filter) Match(a Attributes) bool {
 	if len(f.versions) > 0 {
-		have, ok := parseVersion(serverVersion(a.Version))
+		have, ok := parseVersion(ShortVersion(a.Version))
 		if !ok {
 			return false
 		}
@@ -153,9 +153,9 @@ func (f Filter) Match(a Attributes) bool {
 	return true
 }
 
-// serverVersion strips the leading v and any vendor suffix:
+// ShortVersion strips the leading v and any vendor suffix:
 // v1.29.8-eks-a737599 and v1.30.2+k3s1 become 1.29.8 and 1.30.2.
-func serverVersion(git string) string {
+func ShortVersion(git string) string {
 	s := strings.TrimPrefix(git, "v")
 	if i := strings.IndexAny(s, "-+"); i >= 0 {
 		s = s[:i]
@@ -219,8 +219,8 @@ func compare(c int, op string) bool {
 // ignoring vendor suffixes: -1, 0 or 1. An unparsable version sorts below
 // any parsable one.
 func CompareServerVersions(a, b string) int {
-	va, oka := parseVersion(serverVersion(a))
-	vb, okb := parseVersion(serverVersion(b))
+	va, oka := parseVersion(ShortVersion(a))
+	vb, okb := parseVersion(ShortVersion(b))
 	switch {
 	case !oka && !okb:
 		return 0
@@ -236,4 +236,20 @@ func CompareServerVersions(a, b string) int {
 		vb = append(vb, 0)
 	}
 	return cmpVersion(va, vb)
+}
+
+// ValidVersion reports whether want is a version MatchVersion accepts: an
+// optional v and two or three numeric parts (1.30, v1.30.4).
+func ValidVersion(want string) bool {
+	_, ok := parseVersion(want)
+	return ok
+}
+
+// MatchVersion reports whether a server gitVersion equals want at want's
+// precision, ignoring vendor suffixes: v1.30.4-eks-x matches 1.30 and
+// 1.30.4, not 1.30.5.
+func MatchVersion(git, want string) bool {
+	have, ok := parseVersion(ShortVersion(git))
+	w, okw := parseVersion(want)
+	return ok && okw && cmpVersion(have, w) == 0
 }
