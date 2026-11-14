@@ -21,13 +21,16 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -109,7 +112,9 @@ var suites = []struct {
 			{args: []string{"get", "pods", "-A"}, budgetMB: 400, wantLines: podRows},
 			{args: []string{"get", "pods", "-A", "--server-print=false"}, budgetMB: 800, wantLines: podRows},
 			{args: []string{"get", "pods", "-A", "-o", "name"}, budgetMB: 400, wantLines: podNames},
-			{args: []string{"get", "pods", "-A", "-o", "json"}, budgetMB: 1500},
+			// Streams full objects; the pods carry realistic per-pod IDs and
+			// managedFields, so peaks run 1.4 to 1.7 GB from run to run.
+			{args: []string{"get", "pods", "-A", "-o", "json"}, budgetMB: 2000},
 			{args: []string{"get", "pods", "-A", "--problems"}, budgetMB: 400, wantLines: problemPods},
 			{args: []string{"status"}, budgetMB: 400, wantLines: reachableRows},
 			{args: []string{"version", "--detailed"}, budgetMB: 400},
@@ -298,7 +303,23 @@ func fatal(err error) {
 // clusterData is one pre-encoded variant of a cluster's objects; every
 // healthy cluster shares one, every sick cluster the other.
 type clusterData struct {
-	pods, podRows, nodes, nodeMeta [][]byte
+	pods, podRows, podRowsBare, nodes, nodeMeta [][]byte
+}
+
+// gzippedPerItem is the compressed size per item of one 500-item page, as
+// the fake servers send it.
+func gzippedPerItem(items [][]byte) int {
+	n := min(len(items), 500)
+	if n == 0 {
+		return 0
+	}
+	var buf bytes.Buffer
+	gz, _ := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	for _, b := range items[:n] {
+		_, _ = gz.Write(b)
+	}
+	_ = gz.Close()
+	return buf.Len() / n
 }
 
 func encodeAll(n int, fn func(i int) any) ([][]byte, error) {
@@ -319,6 +340,13 @@ func buildData(f fleetShape, sick bool) (*clusterData, error) {
 	var d clusterData
 	var err error
 	if d.pods, err = encodeAll(f.pods, func(i int) any { return podObject(i, f.nodes, crash(i)) }); err != nil {
+		return nil, err
+	}
+	if d.podRowsBare, err = encodeAll(f.pods, func(i int) any {
+		row := podTableRow(i, f.nodes, crash(i))
+		delete(row, "object")
+		return row
+	}); err != nil {
 		return nil, err
 	}
 	if d.podRows, err = encodeAll(f.pods, func(i int) any { return podTableRow(i, f.nodes, crash(i)) }); err != nil {
@@ -370,6 +398,8 @@ func serveFleet(f fleetShape, latency time.Duration, auth execAuth, limiter *rat
 	if err != nil {
 		return "", nil, err
 	}
+	fmt.Printf("# %s: per pod on the wire (gzip level 1, 500-item page): full %d B, table row %d B\n",
+		f.name, gzippedPerItem(healthy.pods), gzippedPerItem(healthy.podRowsBare))
 	sick, err := buildData(f, true)
 	if err != nil {
 		return "", nil, err
@@ -446,6 +476,13 @@ type fakeAPI struct {
 	version string
 }
 
+type gzipWriter struct {
+	http.ResponseWriter
+	gz *gzip.Writer
+}
+
+func (g gzipWriter) Write(p []byte) (int, error) { return g.gz.Write(p) }
+
 // chunk is the most a throttled write sends per limiter wait.
 const chunk = 64 << 10
 
@@ -477,6 +514,15 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if a.limiter != nil {
 		w = throttledWriter{ResponseWriter: w, ctx: r.Context(), limiter: a.limiter}
 	}
+	// Lists are gzipped as a real API server gzips large responses (level
+	// 1), after the bandwidth cap so the cap counts compressed bytes.
+	isList := r.URL.Path == "/api/v1/pods" || r.URL.Path == "/api/v1/nodes"
+	if isList && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		gz, _ := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		defer func() { _ = gz.Close() }()
+		w.Header().Set("Content-Encoding", "gzip")
+		w = gzipWriter{ResponseWriter: w, gz: gz}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	enc := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 	accept := r.Header.Get("Accept")
@@ -493,11 +539,20 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			{"name": "nodes", "singularName": "node", "namespaced": false, "kind": "Node", "verbs": []string{"get", "list"}},
 		}})
 	case "/api/v1/pods":
+		// Every fake pod is Running (crashlooping ones too), so any other
+		// phase selector matches nothing.
+		pods, rows := a.data.pods, a.data.podRows
+		if r.URL.Query().Get("includeObject") == "None" {
+			rows = a.data.podRowsBare
+		}
+		if sel := r.URL.Query().Get("fieldSelector"); sel != "" && sel != "status.phase=Running" {
+			pods, rows = nil, nil
+		}
 		if strings.Contains(accept, "as=Table") {
-			page(w, r, "Table", a.data.podRows)
+			page(w, r, "Table", rows)
 			return
 		}
-		page(w, r, "PodList", a.data.pods)
+		page(w, r, "PodList", pods)
 	case "/api/v1/nodes":
 		if strings.Contains(accept, "as=PartialObjectMetadataList") {
 			page(w, r, "PartialObjectMetadataList", a.data.nodeMeta)
@@ -565,25 +620,64 @@ const podColumns = `[{"name":"Name","type":"string","priority":0},{"name":"Ready
 
 // podObject is a pod shaped like a typical Deployment replica (~2 KB JSON).
 // A crashlooping pod has its app container waiting in CrashLoopBackOff.
+// hexID is a deterministic, incompressible hex string for pod i: uids and
+// container and image digests are what keep real pod lists from
+// compressing to nothing.
+func hexID(i int, kind string, n int) string {
+	var b strings.Builder
+	for k := 0; b.Len() < n; k++ {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", kind, i, k)))
+		b.WriteString(hex.EncodeToString(sum[:]))
+	}
+	return b.String()[:n]
+}
+
 func podObject(i, nodes int, crashloop bool) map[string]any {
 	ns := fmt.Sprintf("team-%d", i%50)
+	hash := hexID(i, "hash", 5)
 	env := make([]any, 0, 15)
 	for e := range 15 {
 		env = append(env, map[string]any{"name": fmt.Sprintf("ENV_VAR_%d", e), "value": strings.Repeat("v", 30)})
 	}
 	running := map[string]any{"running": map[string]any{"startedAt": "2026-11-01T00:00:00Z"}}
+	ids := func(name string) map[string]any {
+		return map[string]any{
+			"containerID": "containerd://" + hexID(i, name+"-cid", 64),
+			"imageID":     "registry.example.com/team/" + name + "@sha256:" + hexID(i%200, name+"-img", 64),
+		}
+	}
 	app := map[string]any{"name": "app", "ready": true, "restartCount": 0, "started": true, "state": running}
 	if crashloop {
 		app = map[string]any{"name": "app", "ready": false, "restartCount": 12, "state": map[string]any{"waiting": map[string]any{"reason": "CrashLoopBackOff"}}}
 	}
+	for k, v := range ids("app") {
+		app[k] = v
+	}
+	initStatus := map[string]any{"name": "istio-init", "ready": true, "restartCount": 0,
+		"state": map[string]any{"terminated": map[string]any{"exitCode": 0, "reason": "Completed", "startedAt": "2026-11-01T00:00:01Z", "finishedAt": "2026-11-01T00:00:02Z"}}}
+	for k, v := range ids("istio-init") {
+		initStatus[k] = v
+	}
+	sidecar := map[string]any{"name": "sidecar", "ready": true, "restartCount": 0, "started": true, "state": running}
+	for k, v := range ids("sidecar") {
+		sidecar[k] = v
+	}
 	return map[string]any{
 		"kind": "Pod", "apiVersion": "v1",
 		"metadata": map[string]any{
-			"name": fmt.Sprintf("app-%d-7d4f6c5b9-x%05d", i%200, i), "namespace": ns, "uid": fmt.Sprintf("uid-%d", i),
+			"name": fmt.Sprintf("app-%d-7d4f6c5b9-%s%05d", i%200, hash, i), "namespace": ns, "uid": hexID(i, "uid", 36),
 			"creationTimestamp": "2026-11-01T00:00:00Z", "resourceVersion": strconv.Itoa(1000 + i),
-			"labels":          map[string]any{"app": fmt.Sprintf("app-%d", i%200), "pod-template-hash": "7d4f6c5b9", "team": ns},
-			"annotations":     map[string]any{"kubectl.kubernetes.io/restartedAt": "2026-11-01T00:00:00Z", "prometheus.io/scrape": "true"},
+			"labels": map[string]any{"app": fmt.Sprintf("app-%d", i%200), "pod-template-hash": "7d4f6c5b9", "team": ns},
+			"annotations": map[string]any{"kubectl.kubernetes.io/restartedAt": "2026-11-01T00:00:00Z", "prometheus.io/scrape": "true",
+				"checksum/config": hexID(i, "cfg", 64), "checksum/secret": hexID(i, "sec", 64)},
 			"ownerReferences": []any{map[string]any{"apiVersion": "apps/v1", "kind": "ReplicaSet", "name": "rs", "uid": "u", "controller": true}},
+			"managedFields": []any{
+				map[string]any{"manager": "kube-controller-manager", "operation": "Update", "apiVersion": "v1", "time": "2026-11-01T00:00:00Z",
+					"fieldsType": "FieldsV1", "fieldsV1": map[string]any{"f:metadata": map[string]any{"f:labels": map[string]any{".": map[string]any{}, "f:app": map[string]any{}, "f:pod-template-hash": map[string]any{}}},
+						"f:spec": map[string]any{"f:containers": map[string]any{`k:{"name":"app"}`: map[string]any{".": map[string]any{}, "f:env": map[string]any{}, "f:image": map[string]any{}}}}}},
+				map[string]any{"manager": "kubelet", "operation": "Update", "apiVersion": "v1", "time": "2026-11-01T00:00:05Z", "subresource": "status",
+					"fieldsType": "FieldsV1", "fieldsV1": map[string]any{"f:status": map[string]any{"f:conditions": map[string]any{}, "f:containerStatuses": map[string]any{}, "f:podIP": map[string]any{}}}},
+			},
 		},
 		"spec": map[string]any{
 			"nodeName": fmt.Sprintf("node-%d", i%max(nodes, 1)),
@@ -594,15 +688,16 @@ func podObject(i, nodes int, crashloop bool) map[string]any {
 			},
 		},
 		"status": map[string]any{
-			"phase": "Running", "podIP": "10.0.0.1", "hostIP": "192.168.0.1",
+			"phase": "Running", "podIP": fmt.Sprintf("10.%d.%d.%d", i>>16&255, i>>8&255, i&255), "hostIP": "192.168.0.1",
 			"conditions": []any{
 				map[string]any{"type": "Ready", "status": "True"},
 				map[string]any{"type": "ContainersReady", "status": "True"},
 				map[string]any{"type": "PodScheduled", "status": "True"},
 			},
+			"initContainerStatuses": []any{initStatus},
 			"containerStatuses": []any{
 				app,
-				map[string]any{"name": "sidecar", "ready": true, "restartCount": 0, "started": true, "state": running},
+				sidecar,
 			},
 		},
 	}
@@ -617,7 +712,7 @@ func podTableRow(i, nodes int, crashloop bool) map[string]any {
 		ready, status, restarts = "1/2", "CrashLoopBackOff", "12"
 	}
 	return map[string]any{
-		"cells":  []any{obj["metadata"].(map[string]any)["name"], ready, status, restarts, "7d", "10.0.0.1", fmt.Sprintf("node-%d", i%max(nodes, 1)), "<none>", "<none>"},
+		"cells":  []any{obj["metadata"].(map[string]any)["name"], ready, status, restarts, "7d", obj["status"].(map[string]any)["podIP"], fmt.Sprintf("node-%d", i%max(nodes, 1)), "<none>", "<none>"},
 		"object": map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": obj["metadata"]},
 	}
 }
