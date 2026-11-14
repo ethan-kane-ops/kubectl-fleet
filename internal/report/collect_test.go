@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -130,5 +131,18 @@ func TestCollectForbidden(t *testing.T) {
 	cs.PrependReactor("list", "pods", failList("pods", apierrors.NewInternalError(context.DeadlineExceeded)))
 	if _, err := Collect(context.Background(), cs, cs.Discovery(), Options{PendingFor: time.Minute, Now: t0}); err == nil || !strings.Contains(err.Error(), "list pods") {
 		t.Errorf("want a list pods error, got %v", err)
+	}
+}
+
+func TestCollectJSONListsAreNeverNull(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("list", "nodes", failList("nodes", apierrors.NewForbidden(schema.GroupResource{Resource: "nodes"}, "", nil)))
+	c, err := Collect(context.Background(), cs, cs.Discovery(), Options{PendingFor: time.Minute, Now: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(c)
+	if strings.Contains(string(b), "null") {
+		t.Errorf("want [] not null in the json contract: %s", b)
 	}
 }

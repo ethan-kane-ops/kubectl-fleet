@@ -100,6 +100,7 @@ func newReportCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	out := c.Flags().Lookup("output")
 	out.DefValue, out.Usage = "text", "output format: "+report.Formats
 	o.output = "text"
+	o.keepSkipped = true
 	c.Flags().Lookup("strict").Usage = "accepted for consistency; report already exits 2 when any context failed"
 	c.Flags().Lookup("errors").Usage = "show each failed context's full error on stderr; the report itself only names the cause"
 	_ = c.Flags().MarkHidden("no-headers")

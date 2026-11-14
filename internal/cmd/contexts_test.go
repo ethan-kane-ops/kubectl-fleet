@@ -214,3 +214,13 @@ func TestGetMarkdown(t *testing.T) {
 		t.Errorf("unexpected markdown:\n%s", stdout)
 	}
 }
+
+func TestContextsCheckMarkupShowsCauseNotRawError(t *testing.T) {
+	path := writeFakeKubeconfig(t, fakeContext{name: "down", server: "http://127.0.0.1:1"})
+	for _, f := range []string{"markdown", "html"} {
+		stdout, _, _ := runRoot(t, "contexts", "--check", "-o", f, "--kubeconfig", path, "--cache-dir", t.TempDir())
+		if strings.Contains(stdout, "127.0.0.1") || !strings.Contains(stdout, "connection refused") {
+			t.Errorf("%s: want the cause without the server address:\n%s", f, stdout)
+		}
+	}
+}

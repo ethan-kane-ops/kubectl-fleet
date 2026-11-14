@@ -19,7 +19,7 @@ Selection: contexts ^prod-, arn:aws:eks; expecting version 1.30; pending counts 
 | Control planes (clusters) | v1.30.4-eks-a737599 (2) |
 | Kubelets (nodes) | v1.30.4-eks-a737599 (6), v1.29.8-eks-a737599 (1) |
 | Zones (nodes) | eu-west-1a (5), eu-west-1b (2) |
-| Instance types (nodes) | m7g.large (6) |
+| Instance types (nodes) | m7g.large (6), unknown (1) |
 | Provisioners (nodes) | karpenter/general (6), nodegroup/system (1) |
 
 ## Clusters

@@ -107,17 +107,29 @@ func newView(r Report) view {
 			v.ClusterRows = append(v.ClusterRows, []string{c.Context, "-", "-", "-", "-", "-", "-", "-", "failed: " + c.Error})
 			continue
 		}
-		v.ClusterRows = append(v.ClusterRows, []string{
+		row := []string{
 			c.Context,
 			c.ControlPlane,
 			KubeletRange(c.Kubelets),
 			fmt.Sprintf("%d/%d", c.NodesReady, c.NodesTotal),
-			fmt.Sprintf("%d", len(c.Zones)),
+			"-",
 			fmt.Sprintf("%d", c.PodsRunning),
 			fmt.Sprintf("%d", c.PodsPending),
 			fmt.Sprintf("%d", c.PodsCrashLoop),
 			provisionerKinds(c.Provisioners),
-		})
+		}
+		if len(c.Zones) > 0 {
+			row[4] = fmt.Sprintf("%d", len(c.Zones))
+		}
+		// A list the cluster refused shows as unknown, not as zero: zero
+		// would read as an empty or healthy cluster.
+		if c.NodesForbidden {
+			row[2], row[3], row[4], row[8] = "-", "-", "-", "-"
+		}
+		if c.PodsForbidden {
+			row[5], row[6], row[7] = "-", "-", "-"
+		}
+		v.ClusterRows = append(v.ClusterRows, row)
 	}
 	for _, row := range r.Components {
 		v.CompRows = append(v.CompRows, []string{row.Component, row.Version, fmt.Sprintf("%d", row.Clusters)})

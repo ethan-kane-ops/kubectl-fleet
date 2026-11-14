@@ -45,7 +45,7 @@ kubectl fleet report [flags]
   kubectl fleet report --contexts '^prod-' -o markdown > fleet.md
 
   # In a script: alert only when something needs attention
-  kubectl fleet report -o json > fleet.json || [ $? -eq 2 ] && notify fleet.json
+  kubectl fleet report -o json > fleet.json; [ $? -eq 2 ] && notify fleet.json
 ```
 
 ### Options

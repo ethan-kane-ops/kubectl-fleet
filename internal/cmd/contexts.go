@@ -71,11 +71,16 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					return probeOne(kubeconfig.ForContext(kubeFlags, cfg, r.Name), timeout)
 				})
 			}
+			// Markdown and HTML are made to be shared, so they carry the
+			// failure cause, never the raw error with its server address.
+			markup := f == output.FormatMarkdown || f == output.FormatHTML
 			for i, r := range refs {
 				wide := []string{"", "", "", ""}
 				if probe && i < len(probes) {
 					p := probes[i]
 					switch {
+					case p.Err != nil && markup:
+						wide = []string{"no", "", formatLatency(p.Value.latency), fleet.Cause(p.Err)}
 					case p.Err != nil:
 						wide = []string{"no", "", formatLatency(p.Value.latency), p.Err.Error()}
 					default:
@@ -87,7 +92,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			switch {
 			case probe && f == output.FormatTable:
 				f = output.FormatWide
-			case probe && (f == output.FormatMarkdown || f == output.FormatHTML):
+			case probe && markup:
 				tbl.MergeWide()
 			}
 			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {

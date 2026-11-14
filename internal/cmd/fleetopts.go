@@ -34,6 +34,9 @@ type fleetOptions struct {
 	noHeaders   bool
 	where       []string
 	errors      bool
+	// keepSkipped returns a selection even when --where reachable skipped
+	// every context, for report, which lists skipped contexts as failed.
+	keepSkipped bool
 	// probeTimeout, when set, bounds each --where probe instead of
 	// --request-timeout or probeTimeout (contexts --timeout sets it).
 	probeTimeout time.Duration
@@ -181,6 +184,8 @@ func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericcli
 	switch {
 	case len(sel.refs) > 0 || len(sel.failures) > 0, filter.Reachability() == where.UnreachableOnly:
 		// For !reachable an empty selection is an answer: nothing is down.
+		return sel, nil
+	case len(sel.skipped) == len(refs) && o.keepSkipped:
 		return sel, nil
 	case len(sel.skipped) == len(refs):
 		return selection{}, fmt.Errorf("all %d selected contexts are unreachable (skipped by --where reachable)", len(refs))
