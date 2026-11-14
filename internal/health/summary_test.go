@@ -157,7 +157,7 @@ func TestIsCrashLoop(t *testing.T) {
 	}
 	for _, c := range cases {
 		p := &corev1.Pod{Status: corev1.PodStatus{InitContainerStatuses: c.init, ContainerStatuses: c.main}}
-		if got := isCrashLoop(p); got != c.want {
+		if got := IsCrashLoop(p); got != c.want {
 			t.Errorf("%s: isCrashLoop = %v want %v", c.name, got, c.want)
 		}
 	}

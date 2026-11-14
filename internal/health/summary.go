@@ -74,7 +74,7 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 			return fmt.Errorf("unexpected list item %T", obj)
 		}
 		s.NodesTotal++
-		if isNodeReady(n) {
+		if IsNodeReady(n) {
 			s.NodesReady++
 		}
 		return nil
@@ -115,7 +115,7 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 		default:
 			noisyPod = true
 		}
-		if isCrashLoop(p) {
+		if IsCrashLoop(p) {
 			s.PodsCrashLoop++
 			noisyPod = true
 		}
@@ -130,11 +130,11 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 	if err != nil {
 		return s, fmt.Errorf("list pods: %w", err)
 	}
-	s.TopNoisyNS = topNoisy(noisy, 3)
+	s.TopNoisyNS = TopNoisy(noisy, 3)
 	return s, nil
 }
 
-func isNodeReady(n *corev1.Node) bool {
+func IsNodeReady(n *corev1.Node) bool {
 	for _, c := range n.Status.Conditions {
 		if c.Type == corev1.NodeReady {
 			return c.Status == corev1.ConditionTrue
@@ -143,7 +143,7 @@ func isNodeReady(n *corev1.Node) bool {
 	return false
 }
 
-// isCrashLoop reports a pod with a container, init containers included, that
+// IsCrashLoop reports a pod with a container, init containers included, that
 // keeps exiting. The API shows such a container two ways depending on when it
 // is read: Waiting/CrashLoopBackOff during the kubelet's back-off, and
 // Terminated with a non-zero exit in the gap between an exit and the back-off
@@ -151,7 +151,7 @@ func isNodeReady(n *corev1.Node) bool {
 // second, so checking only the first reports a looping pod as healthy.
 // RestartCount > 0 keeps out a container that failed once and is not being
 // restarted, such as a Job's pod under restartPolicy Never.
-func isCrashLoop(p *corev1.Pod) bool {
+func IsCrashLoop(p *corev1.Pod) bool {
 	for _, list := range [][]corev1.ContainerStatus{p.Status.InitContainerStatuses, p.Status.ContainerStatuses} {
 		for _, cs := range list {
 			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
@@ -190,7 +190,7 @@ func countRestartsInWindow(p *corev1.Pod, cutoff time.Time) int {
 	return n
 }
 
-func topNoisy(m map[string]int, n int) []NamespaceNoise {
+func TopNoisy(m map[string]int, n int) []NamespaceNoise {
 	out := make([]NamespaceNoise, 0, len(m))
 	for k, v := range m {
 		out = append(out, NamespaceNoise{Namespace: k, Unhealthy: v})

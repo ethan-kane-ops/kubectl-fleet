@@ -60,7 +60,7 @@ func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.Disco
 	}
 	c.ControlPlane = v.GitVersion
 
-	kubelets, oses, kernels, runtimes, arches := counter{}, counter{}, counter{}, counter{}, counter{}
+	kubelets, oses, kernels, runtimes, arches := Counter{}, Counter{}, Counter{}, Counter{}, Counter{}
 	nodes := pager.New(func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 		return cs.CoreV1().Nodes().List(ctx, o)
 	})
@@ -70,21 +70,36 @@ func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.Disco
 			return fmt.Errorf("unexpected list item %T", obj)
 		}
 		info := n.Status.NodeInfo
-		kubelets.add(info.KubeletVersion)
-		oses.add(info.OSImage)
-		kernels.add(info.KernelVersion)
-		runtimes.add(info.ContainerRuntimeVersion)
-		arches.add(info.Architecture)
+		kubelets.Add(info.KubeletVersion)
+		oses.Add(info.OSImage)
+		kernels.Add(info.KernelVersion)
+		runtimes.Add(info.ContainerRuntimeVersion)
+		arches.Add(info.Architecture)
 		return nil
 	})
-	if err := partial(&c, "nodes", err); err != nil {
+	if err := recordPartial(&c, "nodes", err); err != nil {
 		return c, err
 	}
-	c.Kubelets, c.OSImages, c.Kernels, c.Runtimes, c.Arches = kubelets.sorted(), oses.sorted(), kernels.sorted(), runtimes.sorted(), arches.sorted()
+	c.Kubelets, c.OSImages, c.Kernels, c.Runtimes, c.Arches = kubelets.Sorted(), oses.Sorted(), kernels.Sorted(), runtimes.Sorted(), arches.Sorted()
 
-	deploys, err := cs.AppsV1().Deployments(systemNamespace).List(ctx, metav1.ListOptions{})
-	if err := partial(&c, "kube-system deployments", err); err != nil {
+	comps, part, err := SystemComponents(ctx, cs)
+	if err != nil {
 		return c, err
+	}
+	c.Components = comps
+	c.Partial = append(c.Partial, part...)
+	return c, nil
+}
+
+// SystemComponents lists kube-system Deployments and DaemonSets with the
+// version of their first container, sorted by name. A forbidden list is
+// returned in partial (e.g. "kube-system deployments: forbidden"); any other
+// error fails.
+func SystemComponents(ctx context.Context, cs kubernetes.Interface) (comps []Component, partial []string, err error) {
+	var c Cluster
+	deploys, err := cs.AppsV1().Deployments(systemNamespace).List(ctx, metav1.ListOptions{})
+	if err := recordPartial(&c, "kube-system deployments", err); err != nil {
+		return nil, nil, err
 	}
 	if deploys != nil {
 		for _, d := range deploys.Items {
@@ -92,8 +107,8 @@ func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.Disco
 		}
 	}
 	daemons, err := cs.AppsV1().DaemonSets(systemNamespace).List(ctx, metav1.ListOptions{})
-	if err := partial(&c, "kube-system daemonsets", err); err != nil {
-		return c, err
+	if err := recordPartial(&c, "kube-system daemonsets", err); err != nil {
+		return nil, nil, err
 	}
 	if daemons != nil {
 		for _, d := range daemons.Items {
@@ -101,12 +116,12 @@ func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.Disco
 		}
 	}
 	sort.Slice(c.Components, func(i, j int) bool { return c.Components[i].Name < c.Components[j].Name })
-	return c, nil
+	return c.Components, c.Partial, nil
 }
 
-// partial records a forbidden list as a partial result and returns any
+// recordPartial records a forbidden list as a partial result and returns any
 // other error.
-func partial(c *Cluster, what string, err error) error {
+func recordPartial(c *Cluster, what string, err error) error {
 	switch {
 	case err == nil:
 		return nil
@@ -140,16 +155,18 @@ func imageVersion(image string) string {
 	return "latest"
 }
 
-type counter map[string]int
+// Counter tallies how many times each non-empty value is seen.
+type Counter map[string]int
 
-func (c counter) add(v string) {
+// Add counts v once; empty values are ignored.
+func (c Counter) Add(v string) {
 	if v != "" {
 		c[v]++
 	}
 }
 
-// sorted orders values by node count, most first, then by value.
-func (c counter) sorted() []Count {
+// Sorted orders values by count, most first, then by value.
+func (c Counter) Sorted() []Count {
 	out := make([]Count, 0, len(c))
 	for v, n := range c {
 		out = append(out, Count{Value: v, N: n})
