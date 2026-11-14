@@ -120,10 +120,10 @@ func TestStatusRequestsProtobufAndPagesNodes(t *testing.T) {
 	if err := c.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	for _, path := range []string{"/api/v1/pods", "/api/v1/nodes"} {
-		if got := cl.acceptFor(path); !strings.HasPrefix(got, "application/vnd.kubernetes.protobuf") {
-			t.Errorf("%s Accept=%q want protobuf first", path, got)
-		}
+	// Pods are covered by TestReportPodListsArePhaseFiltered: Running and
+	// other pods come as tables, Pending and Failed as protobuf lists.
+	if got := cl.acceptFor("/api/v1/nodes"); !strings.HasPrefix(got, "application/vnd.kubernetes.protobuf") {
+		t.Errorf("nodes Accept=%q want protobuf first", got)
 	}
 	if !requested(cl, "/api/v1/nodes") || !strings.Contains(strings.Join(cl.paths(), " "), "/api/v1/nodes?limit=500") {
 		t.Errorf("node list not paged: %v", cl.paths())
@@ -198,5 +198,44 @@ func TestStatusTopAppliesToJSON(t *testing.T) {
 	}
 	if len(records) != 1 || records[0]["context"] != "b" {
 		t.Errorf("want only b, got %v", records)
+	}
+}
+
+func statusRows(t *testing.T, c *fakeCluster, args ...string) []map[string]any {
+	t.Helper()
+	path := writeFakeKubeconfig(t, fakeContext{name: "c", server: c.start(t)})
+	out, _, err := runRoot(t, append(append([]string{"status", "-o", "json"}, args...), "--kubeconfig", path, "--cache-dir", t.TempDir())...)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	return rows
+}
+
+func TestStatusWithoutPodTables(t *testing.T) {
+	rows := statusRows(t, &fakeCluster{nodes: 1, noTables: true, pods: []fakePod{{"a", "x"}, {"b", "y"}}})
+	if rows[0]["podsRunning"] != float64(2) || rows[0]["podsTotal"] != float64(2) {
+		t.Errorf("fallback to full lists should still count pods: %v", rows[0])
+	}
+}
+
+func TestStatusCrashloopFromTable(t *testing.T) {
+	c := &fakeCluster{nodes: 1, pods: []fakePod{{"a", "web"}, {"a", "ok"}}, podStatus: map[string]string{"web": "CrashLoopBackOff"}}
+	rows := statusRows(t, c)
+	if rows[0]["podsCrashLoop"] != float64(1) || rows[0]["podsRunning"] != float64(2) {
+		t.Errorf("crashloop from the table STATUS: %v", rows[0])
+	}
+}
+
+func TestStatusSinceReadsFullPods(t *testing.T) {
+	c := &fakeCluster{nodes: 1, pods: []fakePod{{"a", "web"}}}
+	statusRows(t, c, "--since", "1h")
+	for _, p := range c.paths() {
+		if strings.HasPrefix(p, "/api/v1/pods?") && strings.Contains(p, "phase%3DRunning") && strings.Contains(p, "includeObject") {
+			t.Errorf("--since must read Running pods in full, not as a table: %s", p)
+		}
 	}
 }

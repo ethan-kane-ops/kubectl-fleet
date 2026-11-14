@@ -16,6 +16,7 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/pods"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/versions"
 )
 
@@ -210,7 +211,11 @@ func statusOne(ctx context.Context, kc *kubeconfig.Context, opts health.Options)
 	if err != nil {
 		return health.Summary{}, err
 	}
-	return health.Summarize(ctx, clients.Typed, clients.Discovery, opts)
+	src, err := pods.NewSource(clients.REST, clients.Typed)
+	if err != nil {
+		return health.Summary{}, err
+	}
+	return health.Summarize(ctx, clients.Typed, clients.Discovery, src, opts)
 }
 
 // shortDuration drops zero trailing units: 1h0m0s -> 1h, 5m0s -> 5m.

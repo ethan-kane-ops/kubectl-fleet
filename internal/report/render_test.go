@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethan-kane-ops/kubectl-fleet/internal/health"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/inventory"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
 )
@@ -25,7 +24,7 @@ func fixtureReport() Report {
 	sick.Zones = []inventory.Count{{Value: "eu-west-1a", N: 2}, {Value: "eu-west-1b", N: 2}}
 	sick.InstanceTypes = []inventory.Count{{Value: "m7g.large", N: 3}, {Value: "unknown", N: 1}}
 	sick.Provisioners = []Provisioner{{Kind: "karpenter", Name: "general", Nodes: 3}, {Kind: "nodegroup", Name: "system", Nodes: 1}}
-	sick.PodsCrashLoop, sick.CrashLoopNS = 2, []health.NamespaceNoise{{Namespace: "payments", Unhealthy: 2}}
+	sick.PodsCrashLoop = 2
 	sick.Components = []inventory.Component{{Name: "coredns", Kind: "Deployment", Version: "v1.11.1"}}
 	return Build(t0, Selection{Contexts: []string{"^prod-", "arn:aws:eks"}, ExpectVersion: "1.30", PendingFor: "5m"}, []Result{
 		{Context: "prod-eu-1", Cluster: ok},

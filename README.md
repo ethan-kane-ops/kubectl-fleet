@@ -182,8 +182,10 @@ finds the name in every namespace of every context.
 ### `kubectl fleet status`
 
 Per-cluster health snapshot: node readiness, pod counts, server version, and
-the three noisiest namespaces by unhealthy pods (Pending, Failed, Unknown or
-crashlooping; completed Job pods don't count).
+the three namespaces with the most Pending or Failed pods (completed Job pods
+don't count). Running pods are read as compact server-side table rows of a
+few dozen bytes each, which carry no namespace, so crashlooping pods are
+counted but not placed in a namespace; `--since` reads Running pods in full.
 
 ```bash
 kubectl fleet status

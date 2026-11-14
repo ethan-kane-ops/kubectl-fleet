@@ -4,7 +4,7 @@ Selection: contexts ^prod-, arn:aws:eks; expecting version 1.30; pending counts 
 
 3 ITEMS NEED ATTENTION
   [FAILED]     prod-us-1                               context failed: connection refused
-  [CRASHLOOP]  arn:aws:eks:eu-west-1:1:cluster/a|b<c>  2 crashlooping pods (payments(2))
+  [CRASHLOOP]  arn:aws:eks:eu-west-1:1:cluster/a|b<c>  2 crashlooping pods
   [VERSION]    arn:aws:eks:eu-west-1:1:cluster/a|b<c>  kubelets not on 1.30: v1.29.8-eks-a737599(1)
 
 FLEET OVERVIEW

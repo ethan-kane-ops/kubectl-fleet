@@ -13,6 +13,8 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/pager"
+
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/pods"
 )
 
 // Options tunes Summarize.
@@ -38,8 +40,9 @@ type Summary struct {
 	TopNoisyNS                  []NamespaceNoise `json:"topNoisyNamespaces"`
 }
 
-// NamespaceNoise reports a single namespace's unhealthy pod count: Pending,
-// Failed, Unknown or crashlooping, each pod counted once.
+// NamespaceNoise reports a single namespace's unhealthy pod count: its
+// Pending and Failed pods. Crashlooping pods are read as table rows without
+// a namespace, so they are not attributed.
 type NamespaceNoise struct {
 	Namespace string `json:"namespace"`
 	Unhealthy int    `json:"unhealthy"`
@@ -49,7 +52,7 @@ type NamespaceNoise struct {
 //
 // disco may be nil; when set, used for server version (slightly cheaper than
 // a typed client call via Discovery()).
-func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.DiscoveryInterface, opts Options) (Summary, error) {
+func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.DiscoveryInterface, src pods.Source, opts Options) (Summary, error) {
 	var s Summary
 
 	if disco == nil {
@@ -83,54 +86,13 @@ func Summarize(ctx context.Context, cs kubernetes.Interface, disco discovery.Dis
 		return s, fmt.Errorf("list nodes: %w", err)
 	}
 
-	noisy := map[string]int{}
-	var cutoff time.Time
-	if opts.Since > 0 {
-		cutoff = time.Now().Add(-opts.Since)
-	}
-	// Pods are paged (500 per request) and folded into the counters one at a
-	// time, so a large cluster is never held in memory as one list.
-	podLister := pager.New(func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-		return cs.CoreV1().Pods("").List(ctx, o)
-	})
-	err = podLister.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
-		p, ok := obj.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("unexpected list item %T", obj)
-		}
-		s.PodsTotal++
-		// A pod counts once towards its namespace's noise. Succeeded pods
-		// (finished Jobs) are healthy and never count.
-		noisyPod := false
-		switch p.Status.Phase {
-		case corev1.PodRunning:
-			s.PodsRunning++
-		case corev1.PodSucceeded:
-		case corev1.PodPending:
-			s.PodsPending++
-			noisyPod = true
-		case corev1.PodFailed:
-			s.PodsFailed++
-			noisyPod = true
-		default:
-			noisyPod = true
-		}
-		if IsCrashLoop(p) {
-			s.PodsCrashLoop++
-			noisyPod = true
-		}
-		if noisyPod {
-			noisy[p.Namespace]++
-		}
-		if !cutoff.IsZero() {
-			s.ContainersRestartedInWindow += countRestartsInWindow(p, cutoff)
-		}
-		return nil
-	})
+	c, err := pods.Count(ctx, src, pods.Options{Since: opts.Since, Now: time.Now()})
 	if err != nil {
-		return s, fmt.Errorf("list pods: %w", err)
+		return s, err
 	}
-	s.TopNoisyNS = TopNoisy(noisy, 3)
+	s.PodsRunning, s.PodsPending, s.PodsFailed, s.PodsCrashLoop, s.PodsTotal = c.Running, c.Pending, c.Failed, c.CrashLoop, c.Total
+	s.ContainersRestartedInWindow = c.RestartedInWindow
+	s.TopNoisyNS = TopNoisy(c.NoisyNS, 3)
 	return s, nil
 }
 
@@ -141,53 +103,6 @@ func IsNodeReady(n *corev1.Node) bool {
 		}
 	}
 	return false
-}
-
-// IsCrashLoop reports a pod with a container, init containers included, that
-// keeps exiting. The API shows such a container two ways depending on when it
-// is read: Waiting/CrashLoopBackOff during the kubelet's back-off, and
-// Terminated with a non-zero exit in the gap between an exit and the back-off
-// starting. A fast-failing container spends most of its first minutes in the
-// second, so checking only the first reports a looping pod as healthy.
-// RestartCount > 0 keeps out a container that failed once and is not being
-// restarted, such as a Job's pod under restartPolicy Never.
-func IsCrashLoop(p *corev1.Pod) bool {
-	for _, list := range [][]corev1.ContainerStatus{p.Status.InitContainerStatuses, p.Status.ContainerStatuses} {
-		for _, cs := range list {
-			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
-				return true
-			}
-			if t := cs.State.Terminated; t != nil && t.ExitCode != 0 && cs.RestartCount > 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// countRestartsInWindow returns the number of containers in p whose last
-// termination happened after cutoff. A container restarting many times in the
-// window still counts once because only the most recent termination carries
-// a timestamp: accept the floor, the metric is a triage signal, not a SLA.
-func countRestartsInWindow(p *corev1.Pod, cutoff time.Time) int {
-	n := 0
-	for _, cs := range p.Status.ContainerStatuses {
-		if cs.LastTerminationState.Terminated == nil {
-			continue
-		}
-		if cs.LastTerminationState.Terminated.FinishedAt.After(cutoff) {
-			n++
-		}
-	}
-	for _, cs := range p.Status.InitContainerStatuses {
-		if cs.LastTerminationState.Terminated == nil {
-			continue
-		}
-		if cs.LastTerminationState.Terminated.FinishedAt.After(cutoff) {
-			n++
-		}
-	}
-	return n
 }
 
 func TopNoisy(m map[string]int, n int) []NamespaceNoise {

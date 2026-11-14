@@ -154,9 +154,8 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string) {
 	var match []fakePod
-	wantName := strings.TrimPrefix(r.URL.Query().Get("fieldSelector"), "metadata.name=")
 	for _, p := range f.pods {
-		if (ns == "" || p.namespace == ns) && (wantName == "" || p.name == wantName) {
+		if (ns == "" || p.namespace == ns) && fieldsMatch(r.URL.Query().Get("fieldSelector"), p) {
 			match = append(match, p)
 		}
 	}
@@ -170,7 +169,7 @@ func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string
 		meta["continue"] = strconv.Itoa(end)
 	}
 	if f.wantsTable(r) {
-		writeJSON(w, f.podTable(meta, match[start:end]))
+		writeJSON(w, f.podTable(meta, match[start:end], r.URL.Query().Get("includeObject") != "None"))
 		return
 	}
 	items := make([]any, 0, end-start)
@@ -178,6 +177,33 @@ func (f *fakeCluster) listPods(w http.ResponseWriter, r *http.Request, ns string
 		items = append(items, podJSON(p))
 	}
 	writeJSON(w, map[string]any{"kind": "PodList", "apiVersion": "v1", "metadata": meta, "items": items})
+}
+
+// fieldsMatch applies a pod field selector: metadata.name and status.phase
+// with = or !=. Every fake pod is Running.
+func fieldsMatch(selector string, p fakePod) bool {
+	if selector == "" {
+		return true
+	}
+	for _, term := range strings.Split(selector, ",") {
+		field, want, neq := term, "", false
+		if k, v, ok := strings.Cut(term, "!="); ok {
+			field, want, neq = k, v, true
+		} else if k, v, ok := strings.Cut(term, "="); ok {
+			field, want = k, v
+		}
+		have := ""
+		switch field {
+		case "metadata.name":
+			have = p.name
+		case "status.phase":
+			have = "Running"
+		}
+		if (have == want) == neq {
+			return false
+		}
+	}
+	return true
 }
 
 // workloadList renders kube-system workloads with one container each.
@@ -233,7 +259,7 @@ func (f *fakeCluster) wantsTable(r *http.Request) bool {
 }
 
 // podTable renders pods the way an API server's table convertor does.
-func (f *fakeCluster) podTable(meta map[string]any, pods []fakePod) map[string]any {
+func (f *fakeCluster) podTable(meta map[string]any, pods []fakePod, withObjects bool) map[string]any {
 	cols := []map[string]any{{"name": "Name", "priority": 0}, {"name": "Ready", "priority": 0}, {"name": "Status", "priority": 0}, {"name": "Restarts", "priority": 0}}
 	if f.extraColumn != "" {
 		cols = append(cols, map[string]any{"name": f.extraColumn, "priority": 0})
@@ -250,10 +276,11 @@ func (f *fakeCluster) podTable(meta map[string]any, pods []fakePod) map[string]a
 			cells = append(cells, "x")
 		}
 		cells = append(cells, "1d", "10.0.0.9", nil)
-		rows = append(rows, map[string]any{
-			"cells":  cells,
-			"object": map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": map[string]any{"name": p.name, "namespace": p.namespace}},
-		})
+		row := map[string]any{"cells": cells}
+		if withObjects {
+			row["object"] = map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": map[string]any{"name": p.name, "namespace": p.namespace}}
+		}
+		rows = append(rows, row)
 	}
 	return map[string]any{"kind": "Table", "apiVersion": "meta.k8s.io/v1", "metadata": meta, "columnDefinitions": cols, "rows": rows}
 }
@@ -262,7 +289,7 @@ func (f *fakeCluster) getPod(w http.ResponseWriter, r *http.Request, ns, name st
 	for _, p := range f.pods {
 		if p.namespace == ns && p.name == name {
 			if f.wantsTable(r) {
-				writeJSON(w, f.podTable(map[string]any{}, []fakePod{p}))
+				writeJSON(w, f.podTable(map[string]any{}, []fakePod{p}, true))
 				return
 			}
 			writeJSON(w, podJSON(p))

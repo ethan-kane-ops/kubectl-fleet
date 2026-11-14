@@ -24,7 +24,7 @@ func TestBuildAttention(t *testing.T) {
 	notReady := healthy("v1.30.4")
 	notReady.NodesReady = 2
 	crash := healthy("v1.30.4")
-	crash.PodsCrashLoop, crash.CrashLoopNS = 3, []health.NamespaceNoise{{Namespace: "payments", Unhealthy: 2}, {Namespace: "web", Unhealthy: 1}}
+	crash.PodsCrashLoop = 3
 	stuck := healthy("v1.30.4")
 	stuck.PodsPending, stuck.PodsStuckPending, stuck.StuckPendingNS = 2, 2, []health.NamespaceNoise{{Namespace: "batch", Unhealthy: 2}}
 	old := healthy("v1.29.8")
@@ -49,7 +49,7 @@ func TestBuildAttention(t *testing.T) {
 		{Context: "z-down", Kind: KindFailed, Message: "context failed: connection refused"},
 		{Context: "e-forbidden", Kind: KindUninspected, Message: "could not inspect pods: forbidden"},
 		{Context: "a-notready", Kind: KindNotReady, Message: "1 of 3 nodes NotReady", Count: 1},
-		{Context: "b-crash", Kind: KindCrashLoop, Message: "3 crashlooping pods (payments(2), web(1))", Count: 3},
+		{Context: "b-crash", Kind: KindCrashLoop, Message: "3 crashlooping pods", Count: 3},
 		{Context: "c-stuck", Kind: KindStuckPending, Message: "2 pods pending longer than 5m (batch(2))", Count: 2},
 		{Context: "d-old", Kind: KindVersion, Message: "control plane v1.29.8 is not 1.30"},
 		{Context: "d-old", Kind: KindVersion, Message: "kubelets not on 1.30: v1.29.8(3)", Count: 3},
