@@ -101,7 +101,7 @@ func TestContextsFilter(t *testing.T) {
 	var buf bytes.Buffer
 	c.SetOut(&buf)
 	c.SetErr(&buf)
-	c.SetArgs([]string{"--filter", "^prod$"})
+	c.SetArgs([]string{"--contexts", "^prod$"})
 	if err := c.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

@@ -47,7 +47,6 @@ func TestCompleteFlagValues(t *testing.T) {
 	}{
 		{[]string{"status", "--sort-by", ""}, "nodes,pods,version,context"},
 		{[]string{"get", "pods", "-o", ""}, "table,wide,json,yaml,name,markdown,html"},
-		{[]string{"status", "--where", ""}, "version<,version>=,nodes>,nodes<,reachable,!reachable"},
 	}
 	for _, tc := range cases {
 		if got, _ := completions(t, tc.args...); strings.Join(got, ",") != tc.want {

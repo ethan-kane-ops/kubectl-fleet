@@ -49,7 +49,7 @@ func newVersionCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg)
 			if err != nil {
 				return err
 			}

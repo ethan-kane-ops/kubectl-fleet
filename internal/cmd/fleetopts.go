@@ -9,18 +9,14 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/metadata"
-	"k8s.io/client-go/rest"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/fleet"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
-	"github.com/ethan-kane-ops/kubectl-fleet/internal/where"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/versions"
 )
 
 // fleetOptions holds the flags every fleet command shares, so selection,
@@ -32,12 +28,19 @@ type fleetOptions struct {
 	strict      bool
 	output      string
 	noHeaders   bool
-	where       []string
 	errors      bool
-	// keepSkipped returns a selection even when --where reachable skipped
+	// versions keeps contexts whose server version matches any of them.
+	versions []string
+	// skipUnreachable leaves out contexts whose API server can't be
+	// reached, as a skip rather than a failure.
+	skipUnreachable bool
+	// unreachableOnly keeps only the contexts that can't be reached
+	// (contexts --unreachable).
+	unreachableOnly bool
+	// keepSkipped returns a selection even when --skip-unreachable skipped
 	// every context, for report, which lists skipped contexts as failed.
 	keepSkipped bool
-	// probeTimeout, when set, bounds each --where probe instead of
+	// probeTimeout, when set, bounds each probe instead of
 	// --request-timeout or probeTimeout (contexts --timeout sets it).
 	probeTimeout time.Duration
 }
@@ -50,7 +53,10 @@ func (o *fleetOptions) addFlags(c *cobra.Command, defaultParallelism int) {
 	f.BoolVar(&o.strict, "strict", false, "exit non-zero if any context failed")
 	f.StringVarP(&o.output, "output", "o", "table", "output format: table|wide|json|yaml|name|markdown|html")
 	f.BoolVar(&o.noHeaders, "no-headers", false, "suppress header row in table/wide output")
-	f.StringArrayVar(&o.where, "where", nil, "filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable")
+	f.StringArrayVar(&o.versions, "version", nil, "keep contexts whose server version matches; repeatable, any may match (1.29 = any 1.29.x)")
+	if c.Name() != "contexts" {
+		f.BoolVar(&o.skipUnreachable, "skip-unreachable", false, "leave out contexts whose API server cannot be reached, as a skip rather than a failure")
+	}
 }
 
 // addErrorsFlag registers --errors on the commands that summarise failures.
@@ -58,7 +64,7 @@ func (o *fleetOptions) addErrorsFlag(c *cobra.Command) {
 	c.Flags().BoolVar(&o.errors, "errors", false, "show each failed context: an <error> row with its ERROR text, and one warning line per failure (default: a one-line summary)")
 }
 
-// finish reports every failure (from --where and from the work itself) and
+// finish reports every failure (from the probe and from the work itself) and
 // applies --strict. attempted is how many contexts the work ran against.
 func (o *fleetOptions) finish(w io.Writer, sel selection, work []fleet.Failure, attempted int) error {
 	failures := append(append([]fleet.Failure(nil), sel.failures...), work...)
@@ -102,13 +108,11 @@ func (o *fleetOptions) format() (output.Format, error) {
 	return output.ParseFormat(o.output)
 }
 
-// probeTimeout bounds each --where probe request when --request-timeout is
+// probeTimeout bounds each probe request when --request-timeout is
 // not set, so one dead cluster cannot stall the selection pass.
 const probeTimeout = 10 * time.Second
 
-var nodesGVR = schema.GroupVersionResource{Version: "v1", Resource: "nodes"}
-
-// probeResult is what the --where pass learned about one context.
+// probeResult is what the probe pass learned about one context.
 type probeResult struct {
 	version string
 	latency time.Duration
@@ -116,27 +120,29 @@ type probeResult struct {
 }
 
 // selection is the outcome of picking contexts: the ones to run against,
-// the ones whose --where attributes could not be read, and how many
-// unreachable ones --where reachable skipped.
+// the ones the probe could not read, and the unreachable ones
+// --skip-unreachable left out.
 type selection struct {
 	refs     []kubeconfig.ContextRef
 	failures []fleet.Failure
-	// skipped names the unreachable contexts --where reachable left out.
+	// skipped names the unreachable contexts --skip-unreachable left out.
 	skipped []string
-	// probes holds the --where probe per context name; nil without --where.
+	// probes holds the probe per context name; nil when nothing probed.
 	probes map[string]probeResult
 }
 
-// selectContexts applies --context, --contexts, --exclude and --where.
-// allowUnreachable is true only for `contexts`, the one command that can
-// show contexts it cannot reach.
-func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, allowUnreachable bool) (selection, error) {
-	filter, err := where.Parse(o.where)
-	if err != nil {
-		return selection{}, err
-	}
-	if filter.Reachability() == where.UnreachableOnly && !allowUnreachable {
-		return selection{}, fmt.Errorf("--where '!reachable' selects contexts this command cannot query; list them with: kubectl fleet contexts --where '!reachable'")
+// needsProbe reports whether selection has to call each context first.
+func (o *fleetOptions) needsProbe() bool {
+	return len(o.versions) > 0 || o.skipUnreachable || o.unreachableOnly
+}
+
+// selectContexts applies --context, --contexts, --exclude, --version,
+// --skip-unreachable and contexts --unreachable.
+func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config) (selection, error) {
+	for _, v := range o.versions {
+		if !versions.ValidVersion(v) {
+			return selection{}, fmt.Errorf("--version %q must be a version like 1.30 or 1.30.4", v)
+		}
 	}
 	include, err := o.include()
 	if err != nil {
@@ -149,48 +155,57 @@ func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericcli
 	if len(refs) == 0 {
 		return selection{}, fmt.Errorf("no matching contexts")
 	}
-	if filter.Empty() {
+	if !o.needsProbe() {
 		return selection{refs: refs}, nil
 	}
 
-	type probed struct {
-		probeResult
-		attrs where.Attributes
-	}
-	results := fleet.Run(ctx, refs, o.parallelism, func(ctx context.Context, r kubeconfig.ContextRef) (probed, error) {
-		p, attrs := probeContext(ctx, kubeconfig.ForContext(kubeFlags, cfg, r.Name), filter.NeedsNodes(), o.probeTimeout)
-		return probed{probeResult: p, attrs: attrs}, nil
+	results := fleet.Run(ctx, refs, o.parallelism, func(_ context.Context, r kubeconfig.ContextRef) (probeResult, error) {
+		return probeContext(kubeconfig.ForContext(kubeFlags, cfg, r.Name), o.probeTimeout), nil
 	})
 	sel := selection{probes: make(map[string]probeResult, len(refs))}
 	for i, res := range results {
 		ref, p := refs[i], res.Value
-		sel.probes[ref.Name] = p.probeResult
+		sel.probes[ref.Name] = p
 		// Only a network failure means unreachable; a 401 or 403 is a
 		// reachable server refusing us, which must not be skipped.
-		unreachable := p.version == "" && p.err != nil && networkFailure(p.err)
+		unreachable := p.err != nil && networkFailure(p.err)
 		switch {
-		case filter.Reachability() == where.UnreachableOnly:
+		case o.unreachableOnly:
 			if unreachable {
 				sel.refs = append(sel.refs, ref)
 			}
-		case unreachable && filter.Reachability() == where.ReachOnly:
+		case unreachable && o.skipUnreachable:
 			sel.skipped = append(sel.skipped, ref.Name)
 		case p.err != nil:
 			sel.failures = append(sel.failures, fleet.Failure{Context: ref.Name, Err: p.err})
-		case filter.Match(p.attrs):
+		case o.matchesVersion(p.version):
 			sel.refs = append(sel.refs, ref)
 		}
 	}
 	switch {
-	case len(sel.refs) > 0 || len(sel.failures) > 0, filter.Reachability() == where.UnreachableOnly:
-		// For !reachable an empty selection is an answer: nothing is down.
+	case len(sel.refs) > 0 || len(sel.failures) > 0, o.unreachableOnly:
+		// For --unreachable an empty selection is an answer: nothing is down.
 		return sel, nil
 	case len(sel.skipped) == len(refs) && o.keepSkipped:
 		return sel, nil
 	case len(sel.skipped) == len(refs):
-		return selection{}, fmt.Errorf("all %d selected contexts are unreachable (skipped by --where reachable)", len(refs))
+		return selection{}, fmt.Errorf("all %d selected contexts are unreachable (skipped by --skip-unreachable)", len(refs))
 	}
-	return selection{}, fmt.Errorf("no matching contexts: --where excluded all %d", len(refs))
+	return selection{}, fmt.Errorf("no matching contexts: --version matched none of %d", len(refs)-len(sel.skipped))
+}
+
+// matchesVersion reports whether a server version matches any --version;
+// with none given, every version does.
+func (o *fleetOptions) matchesVersion(git string) bool {
+	if len(o.versions) == 0 {
+		return true
+	}
+	for _, v := range o.versions {
+		if versions.MatchVersion(git, v) {
+			return true
+		}
+	}
+	return false
 }
 
 // networkFailure reports a probe error that means the API server could not
@@ -203,12 +218,11 @@ func networkFailure(err error) bool {
 	return false
 }
 
-// probeContext reads a context's version and, when needed, its node count
-// (a metadata-only list, so no Node bodies are transferred).
-func probeContext(ctx context.Context, kc *kubeconfig.Context, needNodes bool, timeout time.Duration) (probeResult, where.Attributes) {
+// probeContext reads a context's server version, timing the call.
+func probeContext(kc *kubeconfig.Context, timeout time.Duration) probeResult {
 	restCfg, err := kc.ToRESTConfig()
 	if err != nil {
-		return probeResult{err: err}, where.Attributes{}
+		return probeResult{err: err}
 	}
 	switch {
 	case timeout > 0:
@@ -218,43 +232,15 @@ func probeContext(ctx context.Context, kc *kubeconfig.Context, needNodes bool, t
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(restCfg)
 	if err != nil {
-		return probeResult{err: fmt.Errorf("discovery client: %w", err)}, where.Attributes{}
+		return probeResult{err: fmt.Errorf("discovery client: %w", err)}
 	}
 	start := time.Now()
 	v, err := disco.ServerVersion()
 	res := probeResult{latency: time.Since(start)}
 	if err != nil {
 		res.err = fmt.Errorf("server version: %w", err)
-		return res, where.Attributes{}
+		return res
 	}
 	res.version = v.GitVersion
-	attrs := where.Attributes{Version: v.GitVersion}
-	if needNodes {
-		n, err := countNodes(ctx, restCfg)
-		if err != nil {
-			res.err = fmt.Errorf("count nodes: %w", err)
-			return res, attrs
-		}
-		attrs.Nodes = n
-	}
-	return res, attrs
-}
-
-func countNodes(ctx context.Context, restCfg *rest.Config) (int, error) {
-	mc, err := metadata.NewForConfig(restCfg)
-	if err != nil {
-		return 0, err
-	}
-	n, opts := 0, metav1.ListOptions{Limit: 500}
-	for {
-		list, err := mc.Resource(nodesGVR).List(ctx, opts)
-		if err != nil {
-			return 0, err
-		}
-		n += len(list.Items)
-		if list.Continue == "" {
-			return n, nil
-		}
-		opts.Continue = list.Continue
-	}
+	return res
 }

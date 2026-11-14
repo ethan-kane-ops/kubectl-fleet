@@ -16,7 +16,7 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
-	"github.com/ethan-kane-ops/kubectl-fleet/internal/where"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/versions"
 )
 
 func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
@@ -47,7 +47,7 @@ func newStatusCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg)
 			if err != nil {
 				return err
 			}
@@ -188,7 +188,7 @@ func sortSummaries(rows []contextSummary, key string) {
 			// order.
 			c = b.PodsRunning - a.PodsRunning
 		case "version":
-			c = where.CompareServerVersions(b.ServerVersion, a.ServerVersion)
+			c = versions.CompareServerVersions(b.ServerVersion, a.ServerVersion)
 		}
 		if c != 0 {
 			return c < 0

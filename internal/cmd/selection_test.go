@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// whereFleet is three contexts: old (v1.29.8, 2 nodes), new (v1.31.0,
+// selectionFleet is three contexts: old (v1.29.8, 2 nodes), new (v1.31.0,
 // 5 nodes) and dead (nothing listening).
-func whereFleet(t *testing.T) (string, *fakeCluster) {
+func selectionFleet(t *testing.T) (string, *fakeCluster) {
 	t.Helper()
 	newer := &fakeCluster{gitVersion: "v1.31.0", nodes: 5}
 	return writeFakeKubeconfig(t,
@@ -30,8 +30,8 @@ func runRoot(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	return out.String(), errOut.String(), err
 }
 
-func TestWhereSelection(t *testing.T) {
-	path, _ := whereFleet(t)
+func TestSelectionFlags(t *testing.T) {
+	path, _ := selectionFleet(t)
 	cases := []struct {
 		name       string
 		args       []string
@@ -42,43 +42,69 @@ func TestWhereSelection(t *testing.T) {
 	}{
 		{
 			name:       "version filter keeps old, dead is a failure",
-			args:       []string{"status", "--where", "version<1.30"},
+			args:       []string{"status", "--version", "1.29"},
 			wantOut:    []string{"old"},
 			notWantOut: []string{"new"},
 			wantStderr: []string{"dead"},
 		},
 		{
 			name:    "a failure still fails --strict",
-			args:    []string{"status", "--where", "version<1.30", "--strict"},
+			args:    []string{"status", "--version", "1.29", "--strict"},
 			wantErr: "1 of",
 		},
 		{
-			name:       "reachable skips dead without failing --strict",
-			args:       []string{"status", "--where", "reachable", "--where", "version<1.30", "--strict"},
+			name:       "skip-unreachable skips dead without failing --strict",
+			args:       []string{"status", "--skip-unreachable", "--version", "1.29", "--strict"},
 			wantOut:    []string{"old"},
 			notWantOut: []string{"new", "dead"},
-			wantStderr: []string{"skipped 1 unreachable"},
+			wantStderr: []string{"skipped 1 unreachable contexts (--skip-unreachable)"},
 		},
 		{
-			name:    "!reachable is only for contexts",
-			args:    []string{"get", "pods", "--where", "!reachable"},
-			wantErr: "contexts --where '!reachable'",
+			name:       "versions are repeatable, any may match",
+			args:       []string{"status", "--skip-unreachable", "--version", "v1.29", "--version", "1.31.0"},
+			wantOut:    []string{"old", "new"},
+			notWantOut: []string{"dead"},
+		},
+		{
+			name:    "--unreachable is only for contexts",
+			args:    []string{"get", "pods", "--unreachable"},
+			wantErr: "unknown flag: --unreachable",
+		},
+		{
+			name:    "--where is gone",
+			args:    []string{"status", "--where", "reachable"},
+			wantErr: "unknown flag: --where",
+		},
+		{
+			name:    "--filter is gone",
+			args:    []string{"contexts", "--filter", "old"},
+			wantErr: "unknown flag: --filter",
 		},
 		{
 			name:       "contexts lists the unreachable ones",
-			args:       []string{"contexts", "--where", "!reachable"},
+			args:       []string{"contexts", "--unreachable"},
 			wantOut:    []string{"dead", "no"},
 			notWantOut: []string{"old", "new"},
 		},
 		{
-			name:    "nothing left after --where",
-			args:    []string{"version", "--where", "reachable", "--where", "version>2.0"},
+			name:    "no version matches",
+			args:    []string{"version", "--skip-unreachable", "--version", "2.0"},
+			wantErr: "no matching contexts: --version matched none of 2",
+		},
+		{
+			name:    "version applies with --context too",
+			args:    []string{"status", "--context", "new", "--version", "1.29"},
 			wantErr: "no matching contexts",
 		},
 		{
-			name:    "bad expression",
-			args:    []string{"status", "--where", "colour=blue"},
-			wantErr: `unknown attribute "colour"`,
+			name:    "bad version",
+			args:    []string{"status", "--version", "latest"},
+			wantErr: `--version "latest" must be a version like 1.30 or 1.30.4`,
+		},
+		{
+			name:    "one part is not a version",
+			args:    []string{"status", "--version", "1"},
+			wantErr: `--version "1" must be a version`,
 		},
 	}
 	for _, tc := range cases {
@@ -112,28 +138,14 @@ func TestWhereSelection(t *testing.T) {
 	}
 }
 
-func TestWhereNodesCountsWithMetadataList(t *testing.T) {
-	path, newer := whereFleet(t)
-	out, _, err := runRoot(t, "version", "--where", "reachable", "--where", "nodes>2", "--kubeconfig", path, "--cache-dir", t.TempDir())
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !strings.Contains(out, "new") || strings.Contains(out, "old") {
-		t.Errorf("nodes>2 should keep only new (5 nodes):\n%s", out)
-	}
-	if got := newer.acceptFor("/api/v1/nodes"); !strings.Contains(got, "as=PartialObjectMetadataList") {
-		t.Errorf("node count should use a metadata-only list, Accept=%q", got)
-	}
-}
-
-func TestNoProbeWithoutWhere(t *testing.T) {
+func TestNoProbeWithoutSelectionFlags(t *testing.T) {
 	cl := &fakeCluster{pods: []fakePod{{"default", "web"}}}
 	path := writeFakeKubeconfig(t, fakeContext{name: "c", server: cl.start(t)})
 	if _, _, err := runRoot(t, "get", "pods", "--kubeconfig", path, "--cache-dir", t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	if requested(cl, "/version") {
-		t.Errorf("get without --where should not probe /version: %v", cl.paths())
+		t.Errorf("get without --version or --skip-unreachable should not probe /version: %v", cl.paths())
 	}
 }
 
@@ -162,20 +174,20 @@ func TestAllContextsFailedExitsNonZero(t *testing.T) {
 	}
 }
 
-func TestContextsWhereHonoursTimeout(t *testing.T) {
+func TestContextsUnreachableHonoursTimeout(t *testing.T) {
 	slow := &fakeCluster{delay: 5 * time.Second}
 	path := writeFakeKubeconfig(t, fakeContext{name: "slow", server: slow.start(t)})
 	start := time.Now()
-	out, _, err := runRoot(t, "contexts", "--where", "!reachable", "--timeout", "1s", "--kubeconfig", path, "--cache-dir", t.TempDir())
+	out, _, err := runRoot(t, "contexts", "--unreachable", "--timeout", "1s", "--kubeconfig", path, "--cache-dir", t.TempDir())
 	if took := time.Since(start); took > 3*time.Second {
-		t.Errorf("took %s; --timeout 1s should bound each --where probe", took)
+		t.Errorf("took %s; --timeout 1s should bound each probe", took)
 	}
 	if err != nil || !strings.Contains(out, "slow") {
 		t.Errorf("a context slower than --timeout counts as unreachable: err=%v out=%s", err, out)
 	}
 }
 
-func TestWhereReachableEdgeCases(t *testing.T) {
+func TestSkipUnreachableEdgeCases(t *testing.T) {
 	denied := &fakeCluster{forbidden: map[string]bool{"/version": true}}
 	cases := []struct {
 		name       string
@@ -187,19 +199,19 @@ func TestWhereReachableEdgeCases(t *testing.T) {
 		{
 			name:    "auth failure is a failure, not unreachable",
 			ctxs:    []fakeContext{{name: "denied", server: denied.start(t)}, {name: "ok", server: (&fakeCluster{}).start(t)}},
-			args:    []string{"status", "--where", "reachable", "--strict"},
+			args:    []string{"status", "--skip-unreachable", "--strict"},
 			wantErr: "1 of 2 contexts failed",
 		},
 		{
 			name:    "every context unreachable says so",
 			ctxs:    []fakeContext{{name: "down", server: "http://127.0.0.1:1"}},
-			args:    []string{"status", "--where", "reachable"},
-			wantErr: "all 1 selected contexts are unreachable",
+			args:    []string{"status", "--skip-unreachable"},
+			wantErr: "all 1 selected contexts are unreachable (skipped by --skip-unreachable)",
 		},
 		{
 			name:       "nothing down is a successful answer",
 			ctxs:       []fakeContext{{name: "ok", server: (&fakeCluster{}).start(t)}},
-			args:       []string{"contexts", "--where", "!reachable"},
+			args:       []string{"contexts", "--unreachable"},
 			wantStderr: "no unreachable contexts",
 		},
 	}

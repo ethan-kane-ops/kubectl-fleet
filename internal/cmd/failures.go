@@ -16,7 +16,7 @@ const namesPerCause = 2
 // reportFailures tells the user which contexts failed. Brief (default):
 // one line grouping failures by cause, largest group first, naming a few
 // contexts each. Detailed (--errors): one line per failed context with the
-// full error. A --where reachable skip count follows either way.
+// full error. A --skip-unreachable skip count follows either way.
 func reportFailures(w io.Writer, total int, failures []fleet.Failure, skipped int, detailed bool) {
 	sorted := append([]fleet.Failure(nil), failures...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Context < sorted[j].Context })
@@ -55,7 +55,7 @@ func reportFailures(w io.Writer, total int, failures []fleet.Failure, skipped in
 		_, _ = fmt.Fprintf(w, "warn: %d of %d contexts failed: %s. Use --errors for details.\n", len(sorted), total, strings.Join(groups, ", "))
 	}
 	if skipped > 0 {
-		_, _ = fmt.Fprintf(w, "warn: skipped %d unreachable contexts (--where reachable).\n", skipped)
+		_, _ = fmt.Fprintf(w, "warn: skipped %d unreachable contexts (--skip-unreachable).\n", skipped)
 	}
 }
 

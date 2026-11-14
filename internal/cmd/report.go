@@ -14,14 +14,14 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/report"
-	"github.com/ethan-kane-ops/kubectl-fleet/internal/where"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/versions"
 )
 
 // reportFormats are the -o values report accepts.
 var reportFormats = []string{"text", "markdown", "html", "json", "yaml"}
 
-// skippedCause is the failure cause of a context --where reachable left out.
-const skippedCause = "unreachable (skipped by --where reachable)"
+// skippedCause is the failure cause of a context --skip-unreachable left out.
+const skippedCause = "unreachable (skipped by --skip-unreachable)"
 
 func newReportCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
@@ -39,7 +39,7 @@ func newReportCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if expectVersion != "" && !where.ValidVersion(expectVersion) {
+			if expectVersion != "" && !versions.ValidVersion(expectVersion) {
 				return fmt.Errorf("--expect-version %q must be a version like 1.30 or 1.30.4", expectVersion)
 			}
 			if pendingFor <= 0 {
@@ -49,7 +49,7 @@ func newReportCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, false)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg)
 			if err != nil {
 				return err
 			}
@@ -101,7 +101,7 @@ func newReportCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	out.DefValue, out.Usage = "text", "output format: "+report.Formats
 	o.output = "text"
 	o.keepSkipped = true
-	c.Flags().Lookup("strict").Usage = "accepted for consistency; report already exits 2 when any context failed"
+	_ = c.Flags().MarkHidden("strict")
 	c.Flags().Lookup("errors").Usage = "show each failed context's full error on stderr; the report itself only names the cause"
 	_ = c.Flags().MarkHidden("no-headers")
 	return c
@@ -120,11 +120,12 @@ func reportFormat(s string) (output.Format, error) {
 
 func reportSelection(kubeFlags *genericclioptions.ConfigFlags, o *fleetOptions, expectVersion string, pendingFor time.Duration) report.Selection {
 	sel := report.Selection{
-		Contexts:      o.contexts,
-		Exclude:       o.exclude,
-		Where:         o.where,
-		ExpectVersion: expectVersion,
-		PendingFor:    shortDuration(pendingFor),
+		Contexts:        o.contexts,
+		Exclude:         o.exclude,
+		Versions:        o.versions,
+		SkipUnreachable: o.skipUnreachable,
+		ExpectVersion:   expectVersion,
+		PendingFor:      shortDuration(pendingFor),
 	}
 	if kubeFlags.Context != nil && *kubeFlags.Context != "" {
 		sel.Context = *kubeFlags.Context

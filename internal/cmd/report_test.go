@@ -143,24 +143,24 @@ func TestReportRepeatedContexts(t *testing.T) {
 	}
 }
 
-func TestReportWhereReachableKeepsSkipped(t *testing.T) {
+func TestReportSkipUnreachableKeepsSkipped(t *testing.T) {
 	up := &fakeCluster{nodes: 1}
 	path := writeFakeKubeconfig(t, fakeContext{name: "up", server: up.start(t)}, fakeContext{name: "down", server: "http://127.0.0.1:1"})
-	stdout, _, err := runReport(t, path, "--where", "reachable")
+	stdout, _, err := runReport(t, path, "--skip-unreachable")
 	if code := exitCode(err); code != 2 {
 		t.Fatalf("exit %d (%v), want 2", code, err)
 	}
-	if !strings.Contains(stdout, "unreachable (skipped by --where reachable)") {
+	if !strings.Contains(stdout, "unreachable (skipped by --skip-unreachable)") {
 		t.Errorf("skipped context must appear in the report:\n%s", stdout)
 	}
 }
 
-func TestReportWhereReachableAllSkipped(t *testing.T) {
-	stdout, _, err := runReport(t, tmpKubeconfigUnreachable(t), "--where", "reachable")
+func TestReportSkipUnreachableAllSkipped(t *testing.T) {
+	stdout, _, err := runReport(t, tmpKubeconfigUnreachable(t), "--skip-unreachable")
 	if code := exitCode(err); code != 2 {
 		t.Fatalf("exit %d (%v), want 2 with a written report", code, err)
 	}
-	if !strings.Contains(stdout, "unreachable (skipped by --where reachable)") {
+	if !strings.Contains(stdout, "unreachable (skipped by --skip-unreachable)") {
 		t.Errorf("all-skipped report must list the skipped contexts:\n%s", stdout)
 	}
 }
