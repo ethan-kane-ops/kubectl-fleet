@@ -116,8 +116,8 @@ type probeResult struct {
 // the ones whose --where attributes could not be read, and how many
 // unreachable ones --where reachable skipped.
 type selection struct {
-	refs               []kubeconfig.ContextRef
-	failures           []fleet.Failure
+	refs     []kubeconfig.ContextRef
+	failures []fleet.Failure
 	// skipped names the unreachable contexts --where reachable left out.
 	skipped []string
 	// probes holds the --where probe per context name; nil without --where.
