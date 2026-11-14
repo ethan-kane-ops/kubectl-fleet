@@ -52,6 +52,9 @@ type TableRow struct {
 type Tables struct {
 	rc  rest.Interface
 	gvr schema.GroupVersionResource
+	// includeObject is what each row carries besides its cells: Metadata
+	// (namespace and name) or None.
+	includeObject string
 }
 
 // NewTables returns a Tables for gvr using restCfg.
@@ -68,7 +71,16 @@ func NewTables(restCfg *rest.Config, gvr schema.GroupVersionResource) (*Tables, 
 	if err != nil {
 		return nil, fmt.Errorf("table client for %s: %w", gvr.Resource, err)
 	}
-	return &Tables{rc: rc, gvr: gvr}, nil
+	return &Tables{rc: rc, gvr: gvr, includeObject: "Metadata"}, nil
+}
+
+// WithoutObjects returns a copy whose rows carry cells only: no namespace or
+// name. Object metadata (managedFields above all) is most of a row's size,
+// so a cells-only table is many times smaller.
+func (t *Tables) WithoutObjects() *Tables {
+	c := *t
+	c.includeObject = "None"
+	return &c
 }
 
 // Get returns the one-row table for name in ns ("" when cluster-scoped).
@@ -115,7 +127,7 @@ func (t *Tables) request(ns string) *rest.Request {
 		SetHeader("Accept", tableAccept).
 		// Metadata, not the full object: the namespace and name are all a
 		// row needs beyond its cells.
-		Param("includeObject", "Metadata")
+		Param("includeObject", t.includeObject)
 }
 
 // wireTable is metav1.Table as decoded here: cells keep JSON numbers exact
