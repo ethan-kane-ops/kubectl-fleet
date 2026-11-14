@@ -10,15 +10,29 @@
 //
 // Wall time is printed for comparison between runs but not enforced: it
 // depends too much on the machine. Peak RSS is stable enough to gate on.
+//
+// The opt-in "work" suite mimics a large EKS fleet seen from a laptop: 300
+// clusters of 5k pods, a higher per-request latency, one exec credential
+// plugin per cluster that burns CPU like `aws eks get-token`, and an
+// optional shared bandwidth cap:
+//
+//	go run ./hack/loadtest -suite work -bandwidth 25
 package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -29,6 +43,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // fleetShape describes a fake fleet. Cluster i is "sick" when i%10 == 0:
@@ -44,6 +60,11 @@ type fleetShape struct {
 	// padUsers adds unused kubeconfig users with embedded credential data,
 	// so the file is the size real fleets carry (~5 KB per entry).
 	padUsers int
+	// latency, when set, replaces -latency for this fleet.
+	latency time.Duration
+	// execAuth gives every cluster its own exec credential plugin, as EKS
+	// kubeconfigs do (aws eks get-token --cluster-name X).
+	execAuth bool
 }
 
 func (f fleetShape) reachable() int { return f.clusters - f.unreachable }
@@ -79,6 +100,8 @@ var (
 var suites = []struct {
 	shape     fleetShape
 	scenarios []scenario
+	// optIn suites run only when -suite names them.
+	optIn bool
 }{
 	{
 		shape: fleetShape{name: "big clusters", clusters: 20, pods: 10000, nodes: 200},
@@ -91,6 +114,7 @@ var suites = []struct {
 			{args: []string{"status"}, budgetMB: 400, wantLines: reachableRows},
 			{args: []string{"version", "--detailed"}, budgetMB: 400},
 			{args: []string{"report"}, budgetMB: 400, wantExit: 2},
+			{args: []string{"report", "--expect-version", "1.30", "-o", "json"}, budgetMB: 400, wantExit: 2},
 			{args: []string{"report", "-o", "html"}, budgetMB: 400, wantExit: 2},
 		},
 	},
@@ -118,10 +142,43 @@ var suites = []struct {
 			{args: []string{"report", "--expect-version", "1.30", "-o", "json"}, budgetMB: 300, wantExit: 2},
 		},
 	},
+	{
+		optIn: true,
+		shape: fleetShape{name: "work", clusters: 300, unreachable: 3, pods: 5000, nodes: 60, latency: 80 * time.Millisecond, execAuth: true},
+		scenarios: []scenario{
+			{args: []string{"contexts", "--check"}, budgetMB: 150, wantLines: func(f fleetShape) int { return f.clusters + 1 }},
+			{args: []string{"version"}, budgetMB: 150, wantLines: func(f fleetShape) int { return f.reachable() + 2 }, wantStderr: failedSummary},
+			{args: []string{"status"}, budgetMB: 500, wantLines: reachableRows, wantStderr: failedSummary},
+			{args: []string{"version", "--detailed"}, budgetMB: 300, wantStderr: failedSummary},
+			{args: []string{"get", "pods", "-A", "--problems"}, budgetMB: 500, wantLines: problemPods},
+			{args: []string{"report"}, budgetMB: 500, wantStderr: failedSummary, wantExit: 2},
+			{args: []string{"report", "-o", "html"}, budgetMB: 500, wantExit: 2},
+			{args: []string{"report", "--parallelism", "96"}, budgetMB: 800, wantExit: 2},
+		},
+	},
+}
+
+// tokenEnv switches this binary into a fake exec credential plugin: it
+// burns CPU for the given duration, as the AWS CLI does starting up and
+// signing, then prints an ExecCredential.
+const tokenEnv = "LOADTEST_FAKE_TOKEN_CPU"
+
+func fakeToken(d time.Duration) {
+	for end := time.Now().Add(d); time.Now().Before(end); {
+	}
+	fmt.Println(`{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"t"}}`)
 }
 
 func main() {
+	if v := os.Getenv(tokenEnv); v != "" {
+		d, _ := time.ParseDuration(v)
+		fakeToken(d)
+		return
+	}
 	bin := flag.String("bin", "bin/kubectl-fleet", "kubectl-fleet binary to test")
+	only := flag.String("suite", "", "run only suites whose name contains this (opt-in suites run only when named)")
+	execCPU := flag.Duration("exec-cpu", 400*time.Millisecond, "CPU each exec credential plugin call burns (exec-auth suites)")
+	bandwidth := flag.Float64("bandwidth", 0, "cap all fake API servers together at this many MB/s (0 = unlimited)")
 	scale := flag.Float64("scale", 1, "multiply pods per cluster (budgets stay fixed): >1 to stress, <1 for a quick run")
 	latency := flag.Duration("latency", 20*time.Millisecond, "added latency per API request")
 	flag.Parse()
@@ -134,10 +191,33 @@ func main() {
 
 	failed := false
 	fmt.Printf("%-14s %-48s %8s %9s %8s  %s\n", "FLEET", "COMMAND", "WALL", "PEAK", "BUDGET", "RESULT")
+	self, err := os.Executable()
+	if err != nil {
+		fatal(err)
+	}
+	var limiter *rate.Limiter
+	if *bandwidth > 0 {
+		limiter = rate.NewLimiter(rate.Limit(*bandwidth*(1<<20)), chunk)
+	}
 	for _, s := range suites {
+		if (*only == "" && s.optIn) || !strings.Contains(s.shape.name, *only) {
+			continue
+		}
 		shape := s.shape
 		shape.pods = max(1, int(float64(shape.pods)**scale))
-		kubeconfig, stop, err := serveFleet(shape, *latency, work)
+		lat := *latency
+		if shape.latency > 0 {
+			lat = shape.latency
+		}
+		auth := execAuth{}
+		if shape.execAuth {
+			cert, err := selfSigned()
+			if err != nil {
+				fatal(err)
+			}
+			auth = execAuth{command: self, cpu: *execCPU, cert: cert}
+		}
+		kubeconfig, stop, err := serveFleet(shape, lat, auth, limiter, work)
 		if err != nil {
 			fatal(err)
 		}
@@ -258,7 +338,34 @@ func buildData(f fleetShape, sick bool) (*clusterData, error) {
 
 // serveFleet starts one fake API server per reachable cluster and writes a
 // kubeconfig with one context per cluster. stop closes the servers.
-func serveFleet(f fleetShape, latency time.Duration, dir string) (kubeconfig string, stop func(), err error) {
+// execAuth, when command is set, is the exec credential plugin each cluster
+// gets its own entry for.
+type execAuth struct {
+	command string
+	cpu     time.Duration
+	cert    tls.Certificate
+}
+
+// selfSigned returns a throwaway certificate for 127.0.0.1.
+func selfSigned() (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
+}
+
+func serveFleet(f fleetShape, latency time.Duration, auth execAuth, limiter *rate.Limiter, dir string) (kubeconfig string, stop func(), err error) {
 	healthy, err := buildData(f, false)
 	if err != nil {
 		return "", nil, err
@@ -268,13 +375,12 @@ func serveFleet(f fleetShape, latency time.Duration, dir string) (kubeconfig str
 		return "", nil, err
 	}
 
-	var cfg, ctxs strings.Builder
+	var cfg, clusters, ctxs strings.Builder
 	cfg.WriteString("apiVersion: v1\nkind: Config\nusers:\n- name: u\n  user: {token: t}\n")
 	pad := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xa5}, 3000))
 	for i := range f.padUsers {
 		fmt.Fprintf(&cfg, "- name: pad-%d\n  user: {client-key-data: %s, client-certificate-data: %s}\n", i, pad, pad[:1500])
 	}
-	cfg.WriteString("clusters:\n")
 	var servers []*http.Server
 	for i := range f.clusters {
 		addr := "127.0.0.1:1" // nothing listens: connection refused
@@ -283,7 +389,7 @@ func serveFleet(f fleetShape, latency time.Duration, dir string) (kubeconfig str
 			if err != nil {
 				return "", nil, err
 			}
-			api := &fakeAPI{data: healthy, latency: latency, version: "v1.30.4-eks-a737599"}
+			api := &fakeAPI{data: healthy, latency: latency, limiter: limiter, version: "v1.30.4-eks-a737599"}
 			if i%10 == 0 {
 				api.data = sick
 			}
@@ -292,13 +398,31 @@ func serveFleet(f fleetShape, latency time.Duration, dir string) (kubeconfig str
 			}
 			srv := &http.Server{Handler: api, ReadHeaderTimeout: 10 * time.Second}
 			servers = append(servers, srv)
-			go func() { _ = srv.Serve(ln) }()
+			if auth.command != "" {
+				// client-go runs exec plugins and sends tokens only over
+				// TLS, as against a real EKS endpoint.
+				srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{auth.cert}}
+				go func() { _ = srv.ServeTLS(ln, "", "") }()
+			} else {
+				go func() { _ = srv.Serve(ln) }()
+			}
 			addr = ln.Addr().String()
 		}
-		fmt.Fprintf(&cfg, "- name: c%03d\n  cluster: {server: \"http://%s\"}\n", i, addr)
-		fmt.Fprintf(&ctxs, "- name: ctx-%03d\n  context: {cluster: c%03d, user: u}\n", i, i)
+		scheme, tlsSkip := "http", ""
+		if auth.command != "" {
+			scheme, tlsSkip = "https", ", insecure-skip-tls-verify: true"
+		}
+		fmt.Fprintf(&clusters, "- name: c%03d\n  cluster: {server: \"%s://%s\"%s}\n", i, scheme, addr, tlsSkip)
+		user := "u"
+		if auth.command != "" {
+			user = fmt.Sprintf("eks-%03d", i)
+			fmt.Fprintf(&cfg, "- name: %s\n  user:\n    exec:\n      apiVersion: client.authentication.k8s.io/v1beta1\n"+
+				"      command: %q\n      args: [eks, get-token, --cluster-name, c%03d]\n"+
+				"      env: [{name: %s, value: %q}]\n      interactiveMode: Never\n", user, auth.command, i, tokenEnv, auth.cpu.String())
+		}
+		fmt.Fprintf(&ctxs, "- name: ctx-%03d\n  context: {cluster: c%03d, user: %s}\n", i, i, user)
 	}
-	cfg.WriteString("contexts:\n" + ctxs.String())
+	cfg.WriteString("clusters:\n" + clusters.String() + "contexts:\n" + ctxs.String())
 	kubeconfig = filepath.Join(dir, strings.ReplaceAll(f.name, " ", "-")+".kubeconfig")
 	if err := os.WriteFile(kubeconfig, []byte(cfg.String()), 0o600); err != nil {
 		return "", nil, err
@@ -316,11 +440,43 @@ func serveFleet(f fleetShape, latency time.Duration, dir string) (kubeconfig str
 type fakeAPI struct {
 	data    *clusterData
 	latency time.Duration
+	// limiter, when set, is shared by every server: the fleet's total
+	// bandwidth, as through one office link or VPN.
+	limiter *rate.Limiter
 	version string
+}
+
+// chunk is the most a throttled write sends per limiter wait.
+const chunk = 64 << 10
+
+type throttledWriter struct {
+	http.ResponseWriter
+	ctx     context.Context
+	limiter *rate.Limiter
+}
+
+func (t throttledWriter) Write(p []byte) (int, error) {
+	n := 0
+	for len(p) > 0 {
+		c := p[:min(len(p), chunk)]
+		if err := t.limiter.WaitN(t.ctx, len(c)); err != nil {
+			return n, err
+		}
+		w, err := t.ResponseWriter.Write(c)
+		n += w
+		if err != nil {
+			return n, err
+		}
+		p = p[len(c):]
+	}
+	return n, nil
 }
 
 func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(a.latency)
+	if a.limiter != nil {
+		w = throttledWriter{ResponseWriter: w, ctx: r.Context(), limiter: a.limiter}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	enc := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 	accept := r.Header.Get("Accept")
