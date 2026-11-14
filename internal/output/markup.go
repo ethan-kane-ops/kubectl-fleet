@@ -26,10 +26,13 @@ func (t *Table) MergeWide() {
 	t.WideHeaders, t.WideRows = nil, nil
 }
 
-// MarkdownCell escapes a value for a Markdown table cell.
+// MarkdownCell escapes a value for a Markdown table cell: pipes, and angle
+// brackets that renderers would read as HTML.
 func MarkdownCell(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, "|", `\|`)
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
 	return strings.ReplaceAll(s, "\n", " ")
 }
 

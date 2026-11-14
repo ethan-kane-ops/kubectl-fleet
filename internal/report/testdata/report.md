@@ -1,0 +1,38 @@
+# Fleet report
+
+Generated 2026-11-14 10:30 UTC. 3 clusters (2 reachable).
+
+Selection: contexts ^prod-, arn:aws:eks; expecting version 1.30; pending counts after 5m.
+
+## 3 items need attention
+
+- **FAILED** `prod-us-1`: context failed: connection refused
+- **CRASHLOOP** `arn:aws:eks:eu-west-1:1:cluster/a|b<c>`: 2 crashlooping pods (payments(2))
+- **VERSION** `arn:aws:eks:eu-west-1:1:cluster/a|b<c>`: kubelets not on 1.30: v1.29.8-eks-a737599(1)
+
+## Fleet overview
+
+| Metric | Value |
+| --- | --- |
+| Nodes | 7 of 7 ready |
+| Pods | 20 running, 0 pending (0 stuck), 2 crashlooping, 0 failed, 20 total |
+| Control planes (clusters) | v1.30.4-eks-a737599 (2) |
+| Kubelets (nodes) | v1.30.4-eks-a737599 (6), v1.29.8-eks-a737599 (1) |
+| Zones (nodes) | eu-west-1a (5), eu-west-1b (2) |
+| Instance types (nodes) | m7g.large (6) |
+| Provisioners (nodes) | karpenter/general (6), nodegroup/system (1) |
+
+## Clusters
+
+| CONTEXT | VERSION | KUBELETS | NODES | ZONES | PODS | PENDING | CRASHLOOP | PROVISIONERS |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| arn:aws:eks:eu-west-1:1:cluster/a\|b&lt;c&gt; | v1.30.4-eks-a737599 | 1.29.8-1.30.4 | 4/4 | 2 | 10 | 0 | 2 | karpenter 3, nodegroup 1 |
+| prod-eu-1 | v1.30.4-eks-a737599 | 1.30.4 | 3/3 | 1 | 10 | 0 | 0 | karpenter 3 |
+| prod-us-1 | - | - | - | - | - | - | - | failed: connection refused |
+
+## kube-system components
+
+| COMPONENT | VERSION | CLUSTERS |
+| --- | --- | --- |
+| coredns | v1.11.1 | 1 |
+| coredns | v1.11.3 | 1 |
