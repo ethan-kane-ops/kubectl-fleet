@@ -239,7 +239,7 @@ Selection: contexts ^prod-; expecting version 1.30; pending counts after 5m
 
 3 ITEMS NEED ATTENTION
   [FAILED]     prod-ap-1  context failed: connection refused
-  [CRASHLOOP]  prod-us-1  2 crashlooping pods (payments(2))
+  [CRASHLOOP]  prod-us-1  2 crashlooping pods
   [VERSION]    prod-us-1  kubelets not on 1.30: v1.29.8-eks-a737599(1)
 
 FLEET OVERVIEW
@@ -351,8 +351,8 @@ kubernetes v1.37 cluster). On an M-series laptop:
 | `report` | 16 s | 16 s |
 | `report --parallelism 96` | 6 s | 6 s |
 
-`status` and `report` read Running pods as compact table rows (under 20 B
-each on the wire) and only Pending and Failed pods in full, so a slow link no
+`status` and `report` read Running pods as compact table rows (a few dozen
+bytes each on the wire) and only Pending and Failed pods in full, so a slow link no
 longer limits them: request latency does, and `--parallelism` helps. Reading
 every pod in full took 32 s for `report` on the 25 MB/s link. Exec
 credential plugins cost about 4 s per 300 clusters at the default

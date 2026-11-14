@@ -226,3 +226,47 @@ func TestIsCrashLoop(t *testing.T) {
 		}
 	}
 }
+
+func TestCountSinceIncludesPendingAndFailed(t *testing.T) {
+	restartedInit := corev1.ContainerStatus{
+		RestartCount:         4,
+		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1, FinishedAt: metav1.NewTime(t0.Add(-5 * time.Minute))}},
+	}
+	stuck := pod("a", corev1.PodPending, t0.Add(-time.Hour))
+	stuck.Status.InitContainerStatuses = []corev1.ContainerStatus{restartedInit}
+	src := &fakeSource{pods: map[string][]*corev1.Pod{
+		SelectPending: {stuck},
+		SelectFailed:  {pod("b", corev1.PodFailed, t0.Add(-time.Hour), restartedInit)},
+	}}
+	got, err := Count(context.Background(), src, Options{Now: t0, Since: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RestartedInWindow != 2 {
+		t.Errorf("RestartedInWindow = %d, want 2 (one Pending, one Failed)", got.RestartedInWindow)
+	}
+}
+
+// partialTableSource emits rows and then reports ErrNoTable, as when a later
+// page comes back as a plain list.
+type partialTableSource struct{ *fakeSource }
+
+func (p partialTableSource) Rows(_ context.Context, _ string, fn func(status, restarts string) error) error {
+	_ = fn("Running", "0")
+	_ = fn("CrashLoopBackOff", "3")
+	return k8s.ErrNoTable
+}
+
+func TestCountFallbackDiscardsPartialRows(t *testing.T) {
+	src := &fakeSource{pods: map[string][]*corev1.Pod{
+		SelectRunning: {pod("x", corev1.PodRunning, t0)},
+		SelectOther:   {pod("x", corev1.PodSucceeded, t0)},
+	}}
+	got, err := Count(context.Background(), partialTableSource{src}, Options{Now: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Running != 1 || got.CrashLoop != 0 || got.Total != 2 {
+		t.Errorf("rows before ErrNoTable must be discarded: %+v", got)
+	}
+}
