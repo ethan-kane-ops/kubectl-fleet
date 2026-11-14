@@ -17,24 +17,29 @@ var Stylesheet string
 // MergeWide moves the wide columns into the regular ones, for formats that
 // have no separate wide form.
 func (t *Table) MergeWide() {
+	n := len(t.WideHeaders)
 	t.Headers = append(t.Headers, t.WideHeaders...)
 	for i := range t.Rows {
+		wide := make([]string, n)
 		if i < len(t.WideRows) {
-			t.Rows[i] = append(t.Rows[i], t.WideRows[i]...)
+			copy(wide, t.WideRows[i])
 		}
+		t.Rows[i] = append(t.Rows[i], wide...)
 	}
 	t.WideHeaders, t.WideRows = nil, nil
 }
 
-// MarkdownCell escapes a value for a Markdown table cell: pipes, and angle
-// brackets that renderers would read as HTML.
+// MarkdownCell escapes text for Markdown, in a table cell or a paragraph:
+// pipes, emphasis markers, backticks, and angle brackets that renderers
+// would read as HTML.
 func MarkdownCell(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, "|", `\|`)
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	return strings.ReplaceAll(s, "\n", " ")
+	return markdownEscaper.Replace(s)
 }
+
+var markdownEscaper = strings.NewReplacer(
+	`\`, `\\`, "|", `\|`, "*", `\*`, "_", `\_`, "`", "\\`",
+	"<", "&lt;", ">", "&gt;", "\n", " ",
+)
 
 func printMarkdown(w io.Writer, t *Table) error {
 	var b strings.Builder

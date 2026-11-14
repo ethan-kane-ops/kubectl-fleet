@@ -14,6 +14,7 @@ Selection: contexts ^prod-, arn:aws:eks; expecting version 1.30; pending counts 
 
 | Metric | Value |
 | --- | --- |
+| Clusters | 3 (2 reachable) |
 | Nodes | 7 of 7 ready |
 | Pods | 20 running, 0 pending (0 stuck), 2 crashlooping, 0 failed, 20 total |
 | Control planes (clusters) | v1.30.4-eks-a737599 (2) |
@@ -24,10 +25,10 @@ Selection: contexts ^prod-, arn:aws:eks; expecting version 1.30; pending counts 
 
 ## Clusters
 
-| CONTEXT | VERSION | KUBELETS | NODES | ZONES | PODS | PENDING | CRASHLOOP | PROVISIONERS |
+| CONTEXT | VERSION | KUBELETS | NODES | ZONES | PODS | PENDING | CRASH | PROVISIONERS |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| arn:aws:eks:eu-west-1:1:cluster/a\|b&lt;c&gt; | v1.30.4-eks-a737599 | 1.29.8-1.30.4 | 4/4 | 2 | 10 | 0 | 2 | karpenter 3, nodegroup 1 |
-| prod-eu-1 | v1.30.4-eks-a737599 | 1.30.4 | 3/3 | 1 | 10 | 0 | 0 | karpenter 3 |
+| arn:aws:eks:eu-west-1:1:cluster/a\|b&lt;c&gt; | 1.30.4 | 1.29.8-1.30.4 | 4/4 | 2 | 10 | 0 | 2 | karpenter 3, nodegroup 1 |
+| prod-eu-1 | 1.30.4 | 1.30.4 | 3/3 | 1 | 10 | 0 | 0 | karpenter 3 |
 | prod-us-1 | - | - | - | - | - | - | - | failed: connection refused |
 
 ## kube-system components

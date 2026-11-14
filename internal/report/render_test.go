@@ -112,13 +112,37 @@ func TestViewRowsForEmptyAndForbidden(t *testing.T) {
 	}))
 	// CONTEXT VERSION KUBELETS NODES ZONES PODS PENDING CRASHLOOP PROVISIONERS
 	want := [][]string{
-		{"a-empty", "v1.30.4", "-", "0/0", "-", "0", "0", "0", "-"},
-		{"b-nonodes", "v1.30.4", "-", "-", "-", "10", "0", "0", "-"},
-		{"c-nopods", "v1.30.4", "1.30.4", "3/3", "1", "-", "-", "-", "karpenter 3"},
+		{"a-empty", "1.30.4", "-", "0/0", "-", "0", "0", "0", "-"},
+		{"b-nonodes", "1.30.4", "-", "-", "-", "10", "0", "0", "-"},
+		{"c-nopods", "1.30.4", "1.30.4", "3/3", "1", "-", "-", "-", "karpenter 3"},
 	}
 	for i, w := range want {
 		if strings.Join(v.ClusterRows[i], ",") != strings.Join(w, ",") {
 			t.Errorf("row %d = %v, want %v", i, v.ClusterRows[i], w)
+		}
+	}
+}
+
+func TestViewOverviewStartsWithClusters(t *testing.T) {
+	v := newView(fixtureReport())
+	if v.Overview[0] != [2]string{"Clusters", "3 (2 reachable)"} {
+		t.Errorf("first overview row = %v", v.Overview[0])
+	}
+}
+
+func TestTextClusterTableFitsChat(t *testing.T) {
+	c := healthy("v1.30.4-eks-a737599")
+	c.Provisioners = []Provisioner{{Kind: "karpenter", Name: "general", Nodes: 30}, {Kind: "nodegroup", Name: "system", Nodes: 10}}
+	r := Build(t0, Selection{PendingFor: "5m"}, []Result{{Context: "prod-eu-west-1", Cluster: c}})
+	var buf bytes.Buffer
+	if err := Render(&buf, r, FormatText); err != nil {
+		t.Fatal(err)
+	}
+	_, table, _ := strings.Cut(buf.String(), "\nCLUSTERS\n")
+	table, _, _ = strings.Cut(table, "\n\n")
+	for _, line := range strings.Split(table, "\n") {
+		if len(line) > 100 {
+			t.Errorf("cluster table line is %d columns, want <= 100:\n%s", len(line), line)
 		}
 	}
 }
