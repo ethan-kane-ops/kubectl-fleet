@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet report</title>
+<style>:root {
+  --bg: #ffffff;
+  --fg: #1d2127;
+  --muted: #5d6673;
+  --border: #d9dde3;
+  --stripe: #f5f7f9;
+  --head: #eef1f4;
+  --bad: #b42318;
+  --bad-bg: #fdecea;
+  --warn: #8a5a00;
+  --warn-bg: #fff4dc;
+  --ok: #1a7f37;
+  --ok-bg: #e7f6ec;
+  --info: #3a5a8c;
+  --info-bg: #eaf0f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15181c;
+    --fg: #e4e7eb;
+    --muted: #9aa3ae;
+    --border: #323840;
+    --stripe: #1b1f24;
+    --head: #222831;
+    --bad: #ff8a80;
+    --bad-bg: #3a1714;
+    --warn: #f2c063;
+    --warn-bg: #33270f;
+    --ok: #6fd58b;
+    --ok-bg: #12301c;
+    --info: #9ab8e8;
+    --info-bg: #1a2638;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 24px 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+main { max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 28px 0 8px; }
+.meta { color: var(--muted); margin: 0 0 16px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { background: var(--head); font-weight: 600; font-size: 12px; letter-spacing: .02em; }
+tbody tr:nth-child(even) td { background: var(--stripe); }
+code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+@media print {
+  body { padding: 0; }
+  .scroll { overflow: visible; }
+  th, td { white-space: normal; }
+}
+
+.verdict { display: inline-block; margin: 8px 0 4px; padding: 6px 12px; border-radius: 6px; font-weight: 600; }
+.verdict.clear { background: var(--ok-bg); color: var(--ok); }
+.verdict.attention { background: var(--bad-bg); color: var(--bad); }
+.label { display: inline-block; min-width: 88px; padding: 1px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-align: center; }
+.label.bad { background: var(--bad-bg); color: var(--bad); }
+.label.warn { background: var(--warn-bg); color: var(--warn); }
+.label.info { background: var(--info-bg); color: var(--info); }
+.overview th { width: 220px; background: transparent; font-size: 13px; letter-spacing: 0; }
+.overview td { white-space: normal; }
+details summary { cursor: pointer; font-size: 16px; font-weight: 600; margin: 28px 0 8px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Fleet report</h1>
+<p class="meta">Generated 2026-11-14 10:30 UTC &middot; 3 clusters (2 reachable)<br>Selection: contexts ^prod-, arn:aws:eks; expecting version 1.30; pending counts after 5m</p>
+
+<p class="verdict attention">3 items need attention</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Status</th><th>Context</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td><span class="label bad">FAILED</span></td><td><code>prod-us-1</code></td><td>context failed: connection refused</td></tr>
+<tr><td><span class="label bad">CRASHLOOP</span></td><td><code>arn:aws:eks:eu-west-1:1:cluster/a|b&lt;c&gt;</code></td><td>2 crashlooping pods (payments(2))</td></tr>
+<tr><td><span class="label warn">VERSION</span></td><td><code>arn:aws:eks:eu-west-1:1:cluster/a|b&lt;c&gt;</code></td><td>kubelets not on 1.30: v1.29.8-eks-a737599(1)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Fleet overview</h2>
+<table class="overview">
+<tbody>
+<tr><th scope="row">Nodes</th><td>7 of 7 ready</td></tr>
+<tr><th scope="row">Pods</th><td>20 running, 0 pending (0 stuck), 2 crashlooping, 0 failed, 20 total</td></tr>
+<tr><th scope="row">Control planes (clusters)</th><td>v1.30.4-eks-a737599 (2)</td></tr>
+<tr><th scope="row">Kubelets (nodes)</th><td>v1.30.4-eks-a737599 (6), v1.29.8-eks-a737599 (1)</td></tr>
+<tr><th scope="row">Zones (nodes)</th><td>eu-west-1a (5), eu-west-1b (2)</td></tr>
+<tr><th scope="row">Instance types (nodes)</th><td>m7g.large (6)</td></tr>
+<tr><th scope="row">Provisioners (nodes)</th><td>karpenter/general (6), nodegroup/system (1)</td></tr>
+</tbody>
+</table>
+
+<h2>Clusters</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>CONTEXT</th><th>VERSION</th><th>KUBELETS</th><th>NODES</th><th>ZONES</th><th>PODS</th><th>PENDING</th><th>CRASHLOOP</th><th>PROVISIONERS</th></tr></thead>
+<tbody>
+<tr><td>arn:aws:eks:eu-west-1:1:cluster/a|b&lt;c&gt;</td><td>v1.30.4-eks-a737599</td><td>1.29.8-1.30.4</td><td>4/4</td><td>2</td><td>10</td><td>0</td><td>2</td><td>karpenter 3, nodegroup 1</td></tr>
+<tr><td>prod-eu-1</td><td>v1.30.4-eks-a737599</td><td>1.30.4</td><td>3/3</td><td>1</td><td>10</td><td>0</td><td>0</td><td>karpenter 3</td></tr>
+<tr><td>prod-us-1</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>failed: connection refused</td></tr>
+</tbody>
+</table>
+</div>
+
+<details>
+<summary>kube-system components</summary>
+<div class="scroll">
+<table>
+<thead><tr><th>COMPONENT</th><th>VERSION</th><th>CLUSTERS</th></tr></thead>
+<tbody>
+<tr><td>coredns</td><td>v1.11.1</td><td>1</td></tr>
+<tr><td>coredns</td><td>v1.11.3</td><td>1</td></tr>
+</tbody>
+</table>
+</div>
+</details>
+</main>
+</body>
+</html>
