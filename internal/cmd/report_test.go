@@ -93,23 +93,36 @@ func TestReportPodsForbidden(t *testing.T) {
 	}
 }
 
-func TestReportRequestsOnePassEach(t *testing.T) {
+func TestReportPodListsArePhaseFiltered(t *testing.T) {
 	c := &fakeCluster{nodes: 2, pods: []fakePod{{"default", "a"}}}
 	path := writeFakeKubeconfig(t, fakeContext{name: "c", server: c.start(t)})
 	if _, _, err := runReport(t, path); err != nil {
 		t.Fatalf("report: %v", err)
 	}
-	nodes, pods := 0, 0
+	nodes := 0
+	var pods []string
 	for _, p := range c.paths() {
 		switch {
 		case strings.HasPrefix(p, "/api/v1/nodes?"):
 			nodes++
 		case strings.HasPrefix(p, "/api/v1/pods?"):
-			pods++
+			pods = append(pods, p)
 		}
 	}
-	if nodes != 1 || pods != 1 {
-		t.Errorf("want one node list and one pod list, got %d and %d: %v", nodes, pods, c.paths())
+	if nodes != 1 || len(pods) != 4 {
+		t.Fatalf("want one node list and four pod lists, got %d and %v", nodes, pods)
+	}
+	tables := 0
+	for _, p := range pods {
+		if !strings.Contains(p, "fieldSelector=status.phase") {
+			t.Errorf("pod list without a phase selector: %s", p)
+		}
+		if strings.Contains(p, "includeObject=None") {
+			tables++
+		}
+	}
+	if tables != 2 {
+		t.Errorf("want the Running and other lists as cells-only tables, got %d: %v", tables, pods)
 	}
 }
 

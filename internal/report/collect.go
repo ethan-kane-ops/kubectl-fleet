@@ -19,6 +19,7 @@ import (
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/health"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/inventory"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/pods"
 )
 
 // Node labels the report reads.
@@ -66,7 +67,6 @@ type Cluster struct {
 	PodsCrashLoop    int                     `json:"podsCrashLoop"`
 	PodsFailed       int                     `json:"podsFailed"`
 	PodsTotal        int                     `json:"podsTotal"`
-	CrashLoopNS      []health.NamespaceNoise `json:"crashLoopNamespaces"`
 	StuckPendingNS   []health.NamespaceNoise `json:"stuckPendingNamespaces"`
 	Components       []inventory.Component   `json:"components"`
 	NodesForbidden   bool                    `json:"nodesForbidden,omitempty"`
@@ -78,7 +78,7 @@ type Cluster struct {
 // list and the kube-system workloads. A forbidden node or pod list is
 // recorded on the Cluster, not returned as an error, so the report can say
 // the cluster could not be inspected.
-func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.DiscoveryInterface, opts Options) (Cluster, error) {
+func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.DiscoveryInterface, src pods.Source, opts Options) (Cluster, error) {
 	var c Cluster
 	v, err := disco.ServerVersion()
 	if err != nil {
@@ -93,12 +93,12 @@ func Collect(ctx context.Context, cs kubernetes.Interface, disco discovery.Disco
 	case err != nil:
 		return c, fmt.Errorf("list nodes: %w", err)
 	}
-	forbidden, err = collectPods(ctx, cs, &c, opts)
+	forbidden, err = collectPods(ctx, src, &c, opts)
 	switch {
 	case forbidden:
 		c.PodsForbidden = true
 	case err != nil:
-		return c, fmt.Errorf("list pods: %w", err)
+		return c, err
 	}
 
 	comps, partial, err := inventory.SystemComponents(ctx, cs)
@@ -120,9 +120,6 @@ func nonNil(c *Cluster) {
 	}
 	if c.Provisioners == nil {
 		c.Provisioners = []Provisioner{}
-	}
-	if c.CrashLoopNS == nil {
-		c.CrashLoopNS = []health.NamespaceNoise{}
 	}
 	if c.StuckPendingNS == nil {
 		c.StuckPendingNS = []health.NamespaceNoise{}
@@ -161,42 +158,14 @@ func collectNodes(ctx context.Context, cs kubernetes.Interface, c *Cluster) (for
 	return false, nil
 }
 
-func collectPods(ctx context.Context, cs kubernetes.Interface, c *Cluster, opts Options) (forbidden bool, err error) {
-	crashNS, stuckNS := map[string]int{}, map[string]int{}
-	lister := pager.New(func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-		return cs.CoreV1().Pods("").List(ctx, o)
-	})
-	err = lister.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
-		p, ok := obj.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("unexpected list item %T", obj)
-		}
-		c.PodsTotal++
-		switch p.Status.Phase {
-		case corev1.PodRunning:
-			c.PodsRunning++
-		case corev1.PodPending:
-			c.PodsPending++
-			// A creation time in the future (clock skew) gives a negative
-			// age, which is never stuck.
-			if opts.Now.Sub(p.CreationTimestamp.Time) >= opts.PendingFor {
-				c.PodsStuckPending++
-				stuckNS[p.Namespace]++
-			}
-		case corev1.PodFailed:
-			c.PodsFailed++
-		}
-		if health.IsCrashLoop(p) {
-			c.PodsCrashLoop++
-			crashNS[p.Namespace]++
-		}
-		return nil
-	})
+func collectPods(ctx context.Context, src pods.Source, c *Cluster, opts Options) (forbidden bool, err error) {
+	n, err := pods.Count(ctx, src, pods.Options{PendingFor: opts.PendingFor, Now: opts.Now})
 	if err != nil {
 		return apierrors.IsForbidden(err), err
 	}
-	c.CrashLoopNS = health.TopNoisy(crashNS, topNamespaces)
-	c.StuckPendingNS = health.TopNoisy(stuckNS, topNamespaces)
+	c.PodsRunning, c.PodsPending, c.PodsStuckPending = n.Running, n.Pending, n.StuckPending
+	c.PodsCrashLoop, c.PodsFailed, c.PodsTotal = n.CrashLoop, n.Failed, n.Total
+	c.StuckPendingNS = health.TopNoisy(n.StuckPendingNS, topNamespaces)
 	return false, nil
 }
 

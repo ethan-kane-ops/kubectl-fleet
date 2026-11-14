@@ -207,7 +207,10 @@ func TestListsArePaged(t *testing.T) {
 			tc.check(t, out.String())
 			pages := 0
 			for _, p := range cl.paths()[before:] {
-				if strings.Contains(p, "/pods?") && strings.Contains(p, "limit=500") {
+				// status reads Running pods as one paged list among four
+				// phase lists; the others are empty here.
+				if strings.Contains(p, "/pods?") && strings.Contains(p, "limit=500") &&
+					(tc.name == "get" || strings.Contains(p, "phase%3DRunning")) {
 					pages++
 				}
 			}

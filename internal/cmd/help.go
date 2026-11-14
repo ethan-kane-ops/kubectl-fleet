@@ -108,7 +108,12 @@ const getExample = `  # Pods in each context's own namespace
 
 const statusLong = `Summarise each cluster's health: control-plane version, nodes
 ready/total, and pod counts (running, pending, crashlooping), with failed
-pods, total pods and the noisiest namespaces under -o wide.
+pods, total pods and the namespaces with the most Pending or Failed pods
+under -o wide.
+
+Running pods are read as compact server-side table rows, which carry no
+namespace, so crashlooping pods are counted but not placed in a namespace.
+--since reads Running pods in full, as it needs each container's last exit.
 
 --problems keeps clusters with NotReady nodes or Pending, Failed or
 crashlooping pods. --sort-by nodes|pods|version puts the largest (or

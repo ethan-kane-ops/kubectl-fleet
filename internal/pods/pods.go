@@ -50,7 +50,7 @@ type Options struct {
 // Counts is what a cluster's pod lists add up to.
 type Counts struct {
 	Running, Pending, StuckPending, CrashLoop, Failed, Total int
-	RestartedInWindow                                       int
+	RestartedInWindow                                        int
 	// StuckPendingNS counts stuck Pending pods per namespace.
 	StuckPendingNS map[string]int
 	// NoisyNS counts Pending and Failed pods per namespace. Crashlooping

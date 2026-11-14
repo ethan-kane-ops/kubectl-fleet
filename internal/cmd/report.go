@@ -13,6 +13,7 @@ import (
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/kubeconfig"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/pods"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/report"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/versions"
 )
@@ -60,7 +61,11 @@ func newReportCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 					if err != nil {
 						return report.Cluster{}, err
 					}
-					return report.Collect(ctx, clients.Typed, clients.Discovery, opts)
+					src, err := pods.NewSource(clients.REST, clients.Typed)
+					if err != nil {
+						return report.Cluster{}, err
+					}
+					return report.Collect(ctx, clients.Typed, clients.Discovery, src, opts)
 				})
 
 			results := make([]report.Result, 0, len(work)+len(sel.failures)+len(sel.skipped))

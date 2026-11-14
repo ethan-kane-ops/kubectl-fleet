@@ -202,7 +202,7 @@ func attention(res Result, sel Selection) []Item {
 		add(KindNotReady, n, "%d of %d nodes NotReady", n, c.NodesTotal)
 	}
 	if !c.PodsForbidden && c.PodsCrashLoop > 0 {
-		add(KindCrashLoop, c.PodsCrashLoop, "%d crashlooping pods (%s)", c.PodsCrashLoop, namespaces(c.CrashLoopNS))
+		add(KindCrashLoop, c.PodsCrashLoop, "%d crashlooping pods", c.PodsCrashLoop)
 	}
 	if !c.PodsForbidden && c.PodsStuckPending > 0 {
 		add(KindStuckPending, c.PodsStuckPending, "%d pods pending longer than %s (%s)", c.PodsStuckPending, sel.PendingFor, namespaces(c.StuckPendingNS))

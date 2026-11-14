@@ -13,11 +13,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/health"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/inventory"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 )
 
 var t0 = time.Date(2026, 11, 14, 10, 30, 0, 0, time.UTC)
@@ -46,7 +48,7 @@ func pod(ns, name string, phase corev1.PodPhase, created time.Time) *corev1.Pod 
 func collect(t *testing.T, objs ...runtime.Object) (Cluster, error) {
 	t.Helper()
 	cs := fake.NewSimpleClientset(objs...)
-	return Collect(context.Background(), cs, cs.Discovery(), Options{PendingFor: 5 * time.Minute, Now: t0})
+	return Collect(context.Background(), cs, cs.Discovery(), fakePods{cs}, Options{PendingFor: 5 * time.Minute, Now: t0})
 }
 
 func TestCollectNodes(t *testing.T) {
@@ -102,9 +104,6 @@ func TestCollectPods(t *testing.T) {
 	if want := []health.NamespaceNoise{{Namespace: "a", Unhealthy: 1}}; !reflect.DeepEqual(c.StuckPendingNS, want) {
 		t.Errorf("stuck pending ns %+v, want %+v", c.StuckPendingNS, want)
 	}
-	if want := []health.NamespaceNoise{{Namespace: "b", Unhealthy: 1}}; !reflect.DeepEqual(c.CrashLoopNS, want) {
-		t.Errorf("crashloop ns %+v, want %+v", c.CrashLoopNS, want)
-	}
 }
 
 func failList(resource string, err error) k8stesting.ReactionFunc {
@@ -118,7 +117,7 @@ func TestCollectForbidden(t *testing.T) {
 		t.Run(res, func(t *testing.T) {
 			cs := fake.NewSimpleClientset()
 			cs.PrependReactor("list", res, failList(res, apierrors.NewForbidden(schema.GroupResource{Resource: res}, "", nil)))
-			c, err := Collect(context.Background(), cs, cs.Discovery(), Options{PendingFor: time.Minute, Now: t0})
+			c, err := Collect(context.Background(), cs, cs.Discovery(), fakePods{cs}, Options{PendingFor: time.Minute, Now: t0})
 			if err != nil {
 				t.Fatalf("forbidden %s should not fail the cluster: %v", res, err)
 			}
@@ -129,15 +128,15 @@ func TestCollectForbidden(t *testing.T) {
 	}
 	cs := fake.NewSimpleClientset()
 	cs.PrependReactor("list", "pods", failList("pods", apierrors.NewInternalError(context.DeadlineExceeded)))
-	if _, err := Collect(context.Background(), cs, cs.Discovery(), Options{PendingFor: time.Minute, Now: t0}); err == nil || !strings.Contains(err.Error(), "list pods") {
-		t.Errorf("want a list pods error, got %v", err)
+	if _, err := Collect(context.Background(), cs, cs.Discovery(), fakePods{cs}, Options{PendingFor: time.Minute, Now: t0}); err == nil || !strings.Contains(err.Error(), "pods:") {
+		t.Errorf("want a pod list error, got %v", err)
 	}
 }
 
 func TestCollectJSONListsAreNeverNull(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	cs.PrependReactor("list", "nodes", failList("nodes", apierrors.NewForbidden(schema.GroupResource{Resource: "nodes"}, "", nil)))
-	c, err := Collect(context.Background(), cs, cs.Discovery(), Options{PendingFor: time.Minute, Now: t0})
+	c, err := Collect(context.Background(), cs, cs.Discovery(), fakePods{cs}, Options{PendingFor: time.Minute, Now: t0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,4 +144,41 @@ func TestCollectJSONListsAreNeverNull(t *testing.T) {
 	if strings.Contains(string(b), "null") {
 		t.Errorf("want [] not null in the json contract: %s", b)
 	}
+}
+
+// fakePods serves the fake clientset's pods as a pods.Source, filtered by
+// phase; it has no tables, so pods.Count reads every list in full.
+type fakePods struct{ cs kubernetes.Interface }
+
+func (f fakePods) Rows(context.Context, string, func(string, string) error) error {
+	return k8s.ErrNoTable
+}
+
+func (f fakePods) Pods(ctx context.Context, selector string, fn func(*corev1.Pod) error) error {
+	list, err := f.cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for i := range list.Items {
+		p := &list.Items[i]
+		if phaseMatches(selector, string(p.Status.Phase)) {
+			if err := fn(p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// phaseMatches applies a status.phase field selector (= or != terms).
+func phaseMatches(selector, phase string) bool {
+	for _, term := range strings.Split(selector, ",") {
+		if v, ok := strings.CutPrefix(term, "status.phase!="); ok && phase == v {
+			return false
+		}
+		if v, ok := strings.CutPrefix(term, "status.phase="); ok && phase != v {
+			return false
+		}
+	}
+	return true
 }

@@ -12,7 +12,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/k8s"
 )
 
 func node(name string, ready bool) *corev1.Node {
@@ -50,7 +53,7 @@ func TestSummarize(t *testing.T) {
 		pod("noisy", "f", corev1.PodRunning, true),
 		pod("noisy", "g", corev1.PodFailed, false),
 	)
-	s, err := Summarize(context.Background(), cs, nil, Options{})
+	s, err := Summarize(context.Background(), cs, nil, fakePods{cs}, Options{})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -73,7 +76,7 @@ func TestSummarize(t *testing.T) {
 
 func TestSummarizeEmptyCluster(t *testing.T) {
 	cs := fake.NewSimpleClientset()
-	s, err := Summarize(context.Background(), cs, nil, Options{})
+	s, err := Summarize(context.Background(), cs, nil, fakePods{cs}, Options{})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -109,7 +112,7 @@ func TestSummarize_ContainersRestartedInWindow(t *testing.T) {
 		podWithRestart("default", "old-1", now.Add(-20*time.Minute)),
 		pod("default", "no-restart", corev1.PodRunning, false),
 	)
-	s, err := Summarize(context.Background(), cs, nil, Options{Since: 5 * time.Minute})
+	s, err := Summarize(context.Background(), cs, nil, fakePods{cs}, Options{Since: 5 * time.Minute})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -122,7 +125,7 @@ func TestSummarize_WindowDisabled(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		podWithRestart("default", "recent", time.Now().Add(-1*time.Minute)),
 	)
-	s, err := Summarize(context.Background(), cs, nil, Options{})
+	s, err := Summarize(context.Background(), cs, nil, fakePods{cs}, Options{})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -152,9 +155,10 @@ func TestSummarizeNoisyNamespaces(t *testing.T) {
 			want: []NamespaceNoise{{"init", 1}},
 		},
 		{
-			name: "unknown phase is noise",
+			// Unknown pods are read with Succeeded ones, as a count only.
+			name: "unknown phase counts in the total only",
 			pods: []*corev1.Pod{pod("lost", "a", corev1.PodUnknown, false)},
-			want: []NamespaceNoise{{"lost", 1}},
+			want: []NamespaceNoise{},
 		},
 	}
 	for _, tc := range cases {
@@ -165,7 +169,7 @@ func TestSummarizeNoisyNamespaces(t *testing.T) {
 					t.Fatalf("add pod: %v", err)
 				}
 			}
-			s, err := Summarize(context.Background(), cs, nil, Options{})
+			s, err := Summarize(context.Background(), cs, nil, fakePods{cs}, Options{})
 			if err != nil {
 				t.Fatalf("Summarize: %v", err)
 			}
@@ -184,7 +188,7 @@ func (failingVersion) ServerVersion() (*version.Info, error) {
 
 func TestSummarizeFailsWhenVersionFails(t *testing.T) {
 	cs := fake.NewSimpleClientset(node("n1", true))
-	_, err := Summarize(context.Background(), cs, failingVersion{cs.Discovery()}, Options{})
+	_, err := Summarize(context.Background(), cs, failingVersion{cs.Discovery()}, fakePods{cs}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "server version: connection refused") {
 		t.Fatalf("want server version error, got %v", err)
 	}
@@ -193,4 +197,41 @@ func TestSummarizeFailsWhenVersionFails(t *testing.T) {
 			t.Errorf("listed %s after version failed", a.GetResource().Resource)
 		}
 	}
+}
+
+// fakePods serves the fake clientset's pods as a pods.Source, filtered by
+// phase; it has no tables, so pods.Count reads every list in full.
+type fakePods struct{ cs kubernetes.Interface }
+
+func (f fakePods) Rows(context.Context, string, func(string, string) error) error {
+	return k8s.ErrNoTable
+}
+
+func (f fakePods) Pods(ctx context.Context, selector string, fn func(*corev1.Pod) error) error {
+	list, err := f.cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for i := range list.Items {
+		p := &list.Items[i]
+		if phaseMatches(selector, string(p.Status.Phase)) {
+			if err := fn(p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// phaseMatches applies a status.phase field selector (= or != terms).
+func phaseMatches(selector, phase string) bool {
+	for _, term := range strings.Split(selector, ",") {
+		if v, ok := strings.CutPrefix(term, "status.phase!="); ok && phase == v {
+			return false
+		}
+		if v, ok := strings.CutPrefix(term, "status.phase="); ok && phase != v {
+			return false
+		}
+	}
+	return true
 }
