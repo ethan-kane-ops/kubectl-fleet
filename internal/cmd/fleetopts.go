@@ -45,7 +45,7 @@ func (o *fleetOptions) addFlags(c *cobra.Command, defaultParallelism int) {
 	f.StringVar(&o.exclude, "exclude", "", "regex of context names to leave out, applied after --contexts")
 	f.IntVar(&o.parallelism, "parallelism", defaultParallelism, "max contexts queried at once (0=unbounded)")
 	f.BoolVar(&o.strict, "strict", false, "exit non-zero if any context failed")
-	f.StringVarP(&o.output, "output", "o", "table", "output format: table|wide|json|yaml|name")
+	f.StringVarP(&o.output, "output", "o", "table", "output format: table|wide|json|yaml|name|markdown|html")
 	f.BoolVar(&o.noHeaders, "no-headers", false, "suppress header row in table/wide output")
 	f.StringArrayVar(&o.where, "where", nil, "filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable")
 }

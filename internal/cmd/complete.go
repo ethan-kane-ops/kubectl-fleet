@@ -42,7 +42,7 @@ func registerCompletions(root *cobra.Command, kubeFlags *genericclioptions.Confi
 	}
 	_ = root.RegisterFlagCompletionFunc("context", contextNames)
 	fixed := map[string][]string{
-		"output":  {"table", "wide", "json", "yaml", "name"},
+		"output":  {"table", "wide", "json", "yaml", "name", "markdown", "html"},
 		"sort-by": statusSortKeys,
 		"where":   {"version<", "version>=", "nodes>", "nodes<", "reachable", "!reachable"},
 	}

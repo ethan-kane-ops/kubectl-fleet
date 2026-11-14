@@ -84,8 +84,11 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				}
 				tbl.Append([]string{r.Name, r.Cluster, r.Namespace, r.AuthInfo}, wide)
 			}
-			if probe && f == output.FormatTable {
+			switch {
+			case probe && f == output.FormatTable:
 				f = output.FormatWide
+			case probe && (f == output.FormatMarkdown || f == output.FormatHTML):
+				tbl.MergeWide()
 			}
 			if err := output.Print(cmd.OutOrStdout(), tbl, f); err != nil {
 				return err
