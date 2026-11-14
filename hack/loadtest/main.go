@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -60,6 +61,9 @@ type scenario struct {
 	wantLines func(f fleetShape) int
 	// wantStderr is a fragment stderr must contain; nil skips the check.
 	wantStderr func(f fleetShape) string
+	// wantExit is the expected exit code (report exits 2 when anything
+	// needs attention, which every fleet here has).
+	wantExit int
 }
 
 var (
@@ -86,6 +90,8 @@ var suites = []struct {
 			{args: []string{"get", "pods", "-A", "--problems"}, budgetMB: 400, wantLines: problemPods},
 			{args: []string{"status"}, budgetMB: 400, wantLines: reachableRows},
 			{args: []string{"version", "--detailed"}, budgetMB: 400},
+			{args: []string{"report"}, budgetMB: 400, wantExit: 2},
+			{args: []string{"report", "-o", "html"}, budgetMB: 400, wantExit: 2},
 		},
 	},
 	{
@@ -107,6 +113,9 @@ var suites = []struct {
 			{args: []string{"get", "pods", "-A"}, budgetMB: 250, wantLines: podRows, wantStderr: failedSummary},
 			{args: []string{"get", "pods", "-A", "--problems"}, budgetMB: 250, wantLines: problemPods},
 			{args: []string{"version", "--detailed"}, budgetMB: 300, wantStderr: failedSummary},
+			{args: []string{"report"}, budgetMB: 300, wantStderr: failedSummary, wantExit: 2},
+			{args: []string{"report", "-o", "html"}, budgetMB: 300, wantExit: 2},
+			{args: []string{"report", "--expect-version", "1.30", "-o", "json"}, budgetMB: 300, wantExit: 2},
 		},
 	},
 }
@@ -161,6 +170,12 @@ func run(bin string, sc scenario, shape fleetShape, kubeconfig, cacheDir string)
 		}
 	}
 	result := "ok"
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == sc.wantExit {
+		err = nil
+	} else if err == nil && sc.wantExit != 0 {
+		err = fmt.Errorf("exit 0, want %d", sc.wantExit)
+	}
 	switch {
 	case err != nil:
 		result = fmt.Sprintf("FAIL: %v: %s", err, firstLine(stderr.String()))
@@ -464,7 +479,12 @@ func nodeObject(i int, notReady bool) map[string]any {
 	}
 	return map[string]any{
 		"kind": "Node", "apiVersion": "v1",
-		"metadata": map[string]any{"name": fmt.Sprintf("node-%d", i), "creationTimestamp": "2026-11-01T00:00:00Z"},
+		"metadata": map[string]any{"name": fmt.Sprintf("node-%d", i), "creationTimestamp": "2026-11-01T00:00:00Z",
+			"labels": map[string]any{
+				"topology.kubernetes.io/zone":      fmt.Sprintf("eu-west-1%c", 'a'+i%3),
+				"node.kubernetes.io/instance-type": "m7g.large",
+				"karpenter.sh/nodepool":            "general",
+			}},
 		"status": map[string]any{
 			"conditions": []any{map[string]any{"type": "Ready", "status": ready}},
 			"nodeInfo": map[string]any{"kubeletVersion": "v1.30.4-eks-a737599", "osImage": "Bottlerocket OS 1.20.0 (aws-k8s-1.30)",
