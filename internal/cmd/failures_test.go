@@ -35,9 +35,9 @@ func TestReportFailures(t *testing.T) {
 			"warn: 12 of 200 contexts failed: 8 timed out (prod-eu-1, prod-eu-2, +6), 4 forbidden (dev-a, dev-b, +2). Use --errors for details.\n"},
 		{"single", 3, []fleet.Failure{{Context: "down", Err: errors.New("boom")}}, 0, false,
 			"warn: 1 of 3 contexts failed: 1 other (down). Use --errors for details.\n"},
-		{"skipped only", 3, nil, 2, false, "warn: skipped 2 unreachable contexts (--where reachable).\n"},
+		{"skipped only", 3, nil, 2, false, "warn: skipped 2 unreachable contexts (--skip-unreachable).\n"},
 		{"detailed", 3, []fleet.Failure{{Context: "b", Err: errors.New("two")}, {Context: "a", Err: errors.New("one")}}, 1, true,
-			"warn: a: one\nwarn: b: two\nwarn: skipped 1 unreachable contexts (--where reachable).\n"},
+			"warn: a: one\nwarn: b: two\nwarn: skipped 1 unreachable contexts (--skip-unreachable).\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -17,9 +17,10 @@ Choosing clusters (on every command):
                        (default: all)
   --exclude REGEX      leave out matching names, applied after --contexts
   --context NAME       exactly one context, overriding both
-  --where EXPR         filter by live attributes, repeatable, all must match:
-                       version<1.30, version>=1.29.3, nodes>50, reachable,
-                       !reachable (contexts only)
+  --version V          server version matches V; repeatable, any may match
+                       (1.29 = any 1.29.x, vendor suffixes ignored)
+  --skip-unreachable   leave out clusters that cannot be reached, as a skip
+                       rather than a failure (not on contexts)
 
 Output and failures:
   -o table|wide|json|yaml|name|markdown|html, --no-headers
@@ -42,7 +43,7 @@ const rootExample = `  # Which contexts can I reach?
   kubectl fleet get pods -A --problems
 
   # Control planes, kubelets and add-ons still on 1.29
-  kubectl fleet version --detailed --where 'version<1.30'`
+  kubectl fleet version --detailed --version 1.29`
 
 const contextsLong = `List kubeconfig contexts, optionally probing each one's API server.
 
@@ -51,8 +52,8 @@ every context (each with its own --timeout) and adds REACHABLE, VERSION,
 LATENCY and ERROR columns. Unlike the other commands, contexts keeps a row
 for every context it could not reach, since reachability is its subject.
 
---where works here too, and only here accepts '!reachable', to list the
-contexts that are down along with why.`
+--unreachable probes like --check and lists only the contexts that are
+down, along with why.`
 
 const contextsExample = `  # Every context in the kubeconfig
   kubectl fleet contexts
@@ -61,7 +62,7 @@ const contextsExample = `  # Every context in the kubeconfig
   kubectl fleet contexts --check --timeout 2s
 
   # Just the ones that are down, with the cause
-  kubectl fleet contexts --where '!reachable'
+  kubectl fleet contexts --unreachable
 
   # CI gate: fail if any production context is unreachable
   kubectl fleet contexts --contexts '^prod-' --check --strict`
@@ -153,7 +154,7 @@ const versionExample = `  # Control-plane version of every cluster
   kubectl fleet version --detailed
 
   # Kubelet skew and add-on versions per cluster, before an upgrade
-  kubectl fleet version --detailed --per-cluster --where 'version<1.30'
+  kubectl fleet version --detailed --per-cluster --version 1.29
 
   # Only the plugin's own version
   kubectl fleet version --client`
@@ -168,7 +169,7 @@ crashlooping, and the kube-system component versions. That is one node
 list and one pod list per cluster.
 
 Needs attention lists, most severe first: contexts that failed (including
-those --where reachable skipped), clusters whose nodes or pods could not be
+those --skip-unreachable skipped), clusters whose nodes or pods could not be
 listed, NotReady nodes, crashlooping pods, pods Pending longer than
 --pending-for, and, with --expect-version, control planes or kubelets on
 another version. Partial kube-system data is listed as information only.

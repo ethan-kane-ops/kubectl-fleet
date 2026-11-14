@@ -36,16 +36,16 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 				return err
 			}
 			o.probeTimeout = timeout
-			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg, true)
+			sel, err := o.selectContexts(cmd.Context(), kubeFlags, cfg)
 			if err != nil {
 				return err
 			}
-			if len(sel.refs) == 0 && len(sel.failures) == 0 {
+			if o.unreachableOnly && len(sel.refs) == 0 && len(sel.failures) == 0 {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no unreachable contexts")
 				return nil
 			}
-			// contexts is the reachability view: a context --where could not
-			// read is shown as an unreachable row, not dropped.
+			// contexts is the reachability view: a context the probe could
+			// not read is shown as an unreachable row, not dropped.
 			refs, err := withFailedRefs(kubeFlags, cfg, &o, sel)
 			if err != nil {
 				return err
@@ -59,7 +59,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			var probes []fleet.ClusterResult[reach]
 			switch {
 			case sel.probes != nil:
-				// --where already probed every context; reuse it rather than
+				// Selection already probed every context; reuse it rather than
 				// waiting on dead clusters a second time.
 				probe = true
 				for _, r := range refs {
@@ -111,8 +111,7 @@ func newContextsCmd(kubeFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	o.addFlags(c, defaultParallelism)
 	c.Flags().Lookup("parallelism").Usage = "max contexts probed at once (0=unbounded)"
 	c.Flags().Lookup("strict").Usage = "exit non-zero if any probed context is unreachable (requires --check)"
-	c.Flags().StringArrayVar(&o.contexts, "filter", nil, "regex selecting kubeconfig contexts by name")
-	_ = c.Flags().MarkDeprecated("filter", "use --contexts")
+	c.Flags().BoolVar(&o.unreachableOnly, "unreachable", false, "list only contexts whose API server cannot be reached, with the cause; implies --check")
 	return c
 }
 
@@ -129,7 +128,7 @@ func formatLatency(d time.Duration) string {
 	return d.Round(time.Millisecond).String()
 }
 
-// withFailedRefs returns the selected contexts plus those --where could not
+// withFailedRefs returns the selected contexts plus those the probe could not
 // read, in name order.
 func withFailedRefs(kubeFlags *genericclioptions.ConfigFlags, cfg *clientcmdapi.Config, o *fleetOptions, sel selection) ([]kubeconfig.ContextRef, error) {
 	if len(sel.failures) == 0 {

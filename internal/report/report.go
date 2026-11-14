@@ -8,7 +8,7 @@ import (
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/health"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/inventory"
-	"github.com/ethan-kane-ops/kubectl-fleet/internal/where"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/versions"
 )
 
 // Kind is the sort of problem an attention item reports, in severity order.
@@ -47,12 +47,13 @@ type Result struct {
 
 // Selection records how the report's contexts were chosen.
 type Selection struct {
-	Context       string   `json:"context,omitempty"`
-	Contexts      []string `json:"contexts,omitempty"`
-	Exclude       string   `json:"exclude,omitempty"`
-	Where         []string `json:"where,omitempty"`
-	ExpectVersion string   `json:"expectVersion,omitempty"`
-	PendingFor    string   `json:"pendingFor"`
+	Context         string   `json:"context,omitempty"`
+	Contexts        []string `json:"contexts,omitempty"`
+	Exclude         string   `json:"exclude,omitempty"`
+	Versions        []string `json:"versions,omitempty"`
+	SkipUnreachable bool     `json:"skipUnreachable,omitempty"`
+	ExpectVersion   string   `json:"expectVersion,omitempty"`
+	PendingFor      string   `json:"pendingFor"`
 }
 
 // Summary is the fleet rollup.
@@ -207,14 +208,14 @@ func attention(res Result, sel Selection) []Item {
 		add(KindStuckPending, c.PodsStuckPending, "%d pods pending longer than %s (%s)", c.PodsStuckPending, sel.PendingFor, namespaces(c.StuckPendingNS))
 	}
 	if want := sel.ExpectVersion; want != "" {
-		if !where.MatchVersion(c.ControlPlane, want) {
+		if !versions.MatchVersion(c.ControlPlane, want) {
 			add(KindVersion, 0, "control plane %s is not %s", c.ControlPlane, want)
 		}
 		if !c.NodesForbidden {
 			var off []string
 			n := 0
 			for _, k := range c.Kubelets {
-				if !where.MatchVersion(k.Value, want) {
+				if !versions.MatchVersion(k.Value, want) {
 					off = append(off, fmt.Sprintf("%s(%d)", k.Value, k.N))
 					n += k.N
 				}
@@ -246,15 +247,15 @@ func KubeletRange(kubelets []inventory.Count) string {
 	}
 	lo, hi := kubelets[0].Value, kubelets[0].Value
 	for _, k := range kubelets[1:] {
-		if where.CompareServerVersions(k.Value, lo) < 0 {
+		if versions.CompareServerVersions(k.Value, lo) < 0 {
 			lo = k.Value
 		}
-		if where.CompareServerVersions(k.Value, hi) > 0 {
+		if versions.CompareServerVersions(k.Value, hi) > 0 {
 			hi = k.Value
 		}
 	}
-	if where.CompareServerVersions(lo, hi) == 0 {
-		return where.ShortVersion(lo)
+	if versions.CompareServerVersions(lo, hi) == 0 {
+		return versions.ShortVersion(lo)
 	}
-	return where.ShortVersion(lo) + "-" + where.ShortVersion(hi)
+	return versions.ShortVersion(lo) + "-" + versions.ShortVersion(hi)
 }

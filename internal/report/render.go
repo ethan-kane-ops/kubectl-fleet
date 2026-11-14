@@ -11,7 +11,7 @@ import (
 
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/inventory"
 	"github.com/ethan-kane-ops/kubectl-fleet/internal/output"
-	"github.com/ethan-kane-ops/kubectl-fleet/internal/where"
+	"github.com/ethan-kane-ops/kubectl-fleet/internal/versions"
 )
 
 // FormatText is the report's plain-text form: aligned, ASCII only, pasteable
@@ -111,7 +111,7 @@ func newView(r Report) view {
 		}
 		row := []string{
 			c.Context,
-			where.ShortVersion(c.ControlPlane),
+			versions.ShortVersion(c.ControlPlane),
 			KubeletRange(c.Kubelets),
 			fmt.Sprintf("%d/%d", c.NodesReady, c.NodesTotal),
 			"-",
@@ -152,8 +152,11 @@ func selectionText(s Selection) string {
 	if s.Exclude != "" {
 		parts = append(parts, "excluding "+s.Exclude)
 	}
-	if len(s.Where) > 0 {
-		parts = append(parts, "where "+strings.Join(s.Where, ", "))
+	if len(s.Versions) > 0 {
+		parts = append(parts, "on version "+strings.Join(s.Versions, " or "))
+	}
+	if s.SkipUnreachable {
+		parts = append(parts, "skipping unreachable")
 	}
 	if s.ExpectVersion != "" {
 		parts = append(parts, "expecting version "+s.ExpectVersion)
@@ -284,7 +287,6 @@ func renderMarkdown(w io.Writer, v view) error {
 	_, err := io.WriteString(w, b.String())
 	return err
 }
-
 
 func mdTable(b *strings.Builder, headers []string, rows [][]string) {
 	t := &output.Table{Headers: headers}

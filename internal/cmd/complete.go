@@ -26,7 +26,7 @@ const noFiles = cobra.ShellCompDirectiveNoFileComp
 
 // registerCompletions wires flag completion on root and every subcommand:
 // context names for --context, --contexts, --exclude and --filter, and the
-// fixed values of -o, --sort-by and --where.
+// fixed values of -o and --sort-by; --version is free text.
 func registerCompletions(root *cobra.Command, kubeFlags *genericclioptions.ConfigFlags) {
 	contextNames := func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		cfg, err := kubeconfig.Load(kubeFlags)
@@ -44,7 +44,6 @@ func registerCompletions(root *cobra.Command, kubeFlags *genericclioptions.Confi
 	fixed := map[string][]string{
 		"output":  {"table", "wide", "json", "yaml", "name", "markdown", "html"},
 		"sort-by": statusSortKeys,
-		"where":   {"version<", "version>=", "nodes>", "nodes<", "reachable", "!reachable"},
 	}
 	for _, c := range root.Commands() {
 		for _, name := range []string{"contexts", "exclude", "filter"} {
@@ -59,12 +58,10 @@ func registerCompletions(root *cobra.Command, kubeFlags *genericclioptions.Confi
 			if name == "output" && c.Name() == "report" {
 				values = reportFormats
 			}
-			directive := noFiles
-			if name == "where" {
-				// version< and friends need a value typed after them.
-				directive |= cobra.ShellCompDirectiveNoSpace
-			}
-			_ = c.RegisterFlagCompletionFunc(name, cobra.FixedCompletions(values, directive))
+			_ = c.RegisterFlagCompletionFunc(name, cobra.FixedCompletions(values, noFiles))
+		}
+		if c.Flags().Lookup("version") != nil {
+			_ = c.RegisterFlagCompletionFunc("version", cobra.NoFileCompletions)
 		}
 	}
 }
