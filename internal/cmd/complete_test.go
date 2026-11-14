@@ -46,7 +46,7 @@ func TestCompleteFlagValues(t *testing.T) {
 		want string
 	}{
 		{[]string{"status", "--sort-by", ""}, "nodes,pods,version,context"},
-		{[]string{"get", "pods", "-o", ""}, "table,wide,json,yaml,name"},
+		{[]string{"get", "pods", "-o", ""}, "table,wide,json,yaml,name,markdown,html"},
 		{[]string{"status", "--where", ""}, "version<,version>=,nodes>,nodes<,reachable,!reachable"},
 	}
 	for _, tc := range cases {

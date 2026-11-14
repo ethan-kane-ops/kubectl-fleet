@@ -26,6 +26,10 @@ const (
 	// scripting. When CONTEXT and NAMESPACE columns are absent the first
 	// non-empty column is used.
 	FormatName Format = "name"
+	// FormatMarkdown and FormatHTML render the regular table columns as a
+	// Markdown table or a standalone HTML page, for sharing.
+	FormatMarkdown Format = "markdown"
+	FormatHTML     Format = "html"
 )
 
 // ParseFormat returns Format for a `-o` string. Empty defaults to table.
@@ -41,6 +45,10 @@ func ParseFormat(s string) (Format, error) {
 		return FormatYAML, nil
 	case "name":
 		return FormatName, nil
+	case "markdown", "md":
+		return FormatMarkdown, nil
+	case "html":
+		return FormatHTML, nil
 	default:
 		return "", fmt.Errorf("unknown output format %q", s)
 	}
@@ -79,6 +87,10 @@ func Print(w io.Writer, t *Table, f Format) error {
 		return printYAML(w, toObjects(t, true))
 	case FormatName:
 		return printName(w, t)
+	case FormatMarkdown:
+		return printMarkdown(w, t)
+	case FormatHTML:
+		return printHTML(w, t)
 	}
 	return fmt.Errorf("unknown format %q", f)
 }

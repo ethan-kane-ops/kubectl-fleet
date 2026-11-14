@@ -190,3 +190,27 @@ func TestFormatLatency(t *testing.T) {
 		}
 	}
 }
+
+func TestContextsCheckMarkdownKeepsProbeColumns(t *testing.T) {
+	up := &fakeCluster{nodes: 1}
+	path := writeFakeKubeconfig(t, fakeContext{name: "up", server: up.start(t)})
+	stdout, _, err := runRoot(t, "contexts", "--check", "-o", "markdown", "--kubeconfig", path, "--cache-dir", t.TempDir())
+	if err != nil {
+		t.Fatalf("contexts: %v", err)
+	}
+	if !strings.Contains(stdout, "| REACHABLE |") || !strings.Contains(stdout, "| yes |") {
+		t.Errorf("markdown should carry the probe columns:\n%s", stdout)
+	}
+}
+
+func TestGetMarkdown(t *testing.T) {
+	up := &fakeCluster{pods: []fakePod{{"default", "web"}}, nodes: 1}
+	path := writeFakeKubeconfig(t, fakeContext{name: "up", server: up.start(t)})
+	stdout, _, err := runRoot(t, "get", "pods", "-A", "-o", "md", "--kubeconfig", path, "--cache-dir", t.TempDir())
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !strings.HasPrefix(stdout, "| CONTEXT |") || !strings.Contains(stdout, "| up | default | web |") {
+		t.Errorf("unexpected markdown:\n%s", stdout)
+	}
+}

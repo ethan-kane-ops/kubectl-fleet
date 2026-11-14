@@ -21,7 +21,7 @@ Choosing clusters (on every command):
                        !reachable (contexts only)
 
 Output and failures:
-  -o table|wide|json|yaml|name, --no-headers
+  -o table|wide|json|yaml|name|markdown|html, --no-headers
   --errors             show each failed context and its full error
   --strict             exit non-zero if any context failed
   --parallelism N      contexts queried at once (32; 16 for get)
