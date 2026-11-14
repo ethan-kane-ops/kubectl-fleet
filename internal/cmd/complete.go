@@ -25,7 +25,7 @@ const completionDeadline = 2500 * time.Millisecond
 const noFiles = cobra.ShellCompDirectiveNoFileComp
 
 // registerCompletions wires flag completion on root and every subcommand:
-// context names for --context, --contexts, --exclude and --filter, and the
+// context names for --context, --contexts and --exclude, and the
 // fixed values of -o and --sort-by; --version is free text.
 func registerCompletions(root *cobra.Command, kubeFlags *genericclioptions.ConfigFlags) {
 	contextNames := func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
@@ -46,7 +46,7 @@ func registerCompletions(root *cobra.Command, kubeFlags *genericclioptions.Confi
 		"sort-by": statusSortKeys,
 	}
 	for _, c := range root.Commands() {
-		for _, name := range []string{"contexts", "exclude", "filter"} {
+		for _, name := range []string{"contexts", "exclude"} {
 			if c.Flags().Lookup(name) != nil {
 				_ = c.RegisterFlagCompletionFunc(name, contextNames)
 			}

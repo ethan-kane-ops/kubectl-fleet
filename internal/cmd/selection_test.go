@@ -71,6 +71,16 @@ func TestSelectionFlags(t *testing.T) {
 			wantErr: "unknown flag: --unreachable",
 		},
 		{
+			name:    "--skip-unreachable is not on contexts",
+			args:    []string{"contexts", "--skip-unreachable"},
+			wantErr: "unknown flag: --skip-unreachable",
+		},
+		{
+			name:    "--unreachable with --version is rejected",
+			args:    []string{"contexts", "--unreachable", "--version", "1.29"},
+			wantErr: "--version cannot be combined with --unreachable",
+		},
+		{
 			name:    "--where is gone",
 			args:    []string{"status", "--where", "reachable"},
 			wantErr: "unknown flag: --where",

@@ -292,7 +292,7 @@ Every command takes the same selectors:
 | `--exclude REGEX` | leaves out matching names, applied after `--contexts` |
 | `--context NAME` | exactly one context, overriding both |
 | `--version V` | server version matches `V`; repeatable, any may match |
-| `--skip-unreachable` | leaves out clusters that cannot be reached, as a skip rather than a failure |
+| `--skip-unreachable` | leaves out clusters that cannot be reached, as a skip rather than a failure (not on `contexts`, which has `--unreachable`) |
 
 `--version` compares at the precision you type (`1.29` matches any
 `1.29.x`, `1.29.8` only that patch) and ignores vendor suffixes such as
