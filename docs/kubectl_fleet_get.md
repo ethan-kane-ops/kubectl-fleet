@@ -54,19 +54,19 @@ kubectl fleet get KIND [NAME] [flags]
 ### Options
 
 ```
-  -A, --all-namespaces      query across all namespaces
-      --contexts string     regex selecting kubeconfig contexts by name (default: all)
-      --errors              show each failed context: an <error> row with its ERROR text, and one warning line per failure (default: a one-line summary)
-      --exclude string      regex of context names to leave out, applied after --contexts
-  -h, --help                help for get
-      --no-headers          suppress header row in table/wide output
-  -o, --output string       output format: table|wide|json|yaml|name (default "table")
-      --parallelism int     max contexts queried at once (0=unbounded); each in-flight context holds a page of up to 500 decoded objects (default 16)
-      --problems            show only unhealthy rows: STATUS not healthy (Running, Completed, Ready, Bound…) or READY short (1/2)
-  -l, --selector string     label selector
-      --server-print        let each API server render the table columns, as kubectl does; false uses built-in columns (default true)
-      --strict              exit non-zero if any context failed
-      --where stringArray   filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
+  -A, --all-namespaces         query across all namespaces
+      --contexts stringArray   regex selecting kubeconfig contexts by name; repeatable, any may match (default: all)
+      --errors                 show each failed context: an <error> row with its ERROR text, and one warning line per failure (default: a one-line summary)
+      --exclude string         regex of context names to leave out, applied after --contexts
+  -h, --help                   help for get
+      --no-headers             suppress header row in table/wide output
+  -o, --output string          output format: table|wide|json|yaml|name|markdown|html (default "table")
+      --parallelism int        max contexts queried at once (0=unbounded); each in-flight context holds a page of up to 500 decoded objects (default 16)
+      --problems               show only unhealthy rows: STATUS not healthy (Running, Completed, Ready, Bound…) or READY short (1/2)
+  -l, --selector string        label selector
+      --server-print           let each API server render the table columns, as kubectl does; false uses built-in columns (default true)
+      --strict                 exit non-zero if any context failed
+      --where stringArray      filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
 ```
 
 ### Options inherited from parent commands

@@ -13,7 +13,8 @@ cause, and --strict turns them into a non-zero exit. When every context
 fails the command exits non-zero regardless.
 
 Choosing clusters (on every command):
-  --contexts REGEX     contexts whose name matches (default: all)
+  --contexts REGEX     contexts whose name matches; repeatable, any may match
+                       (default: all)
   --exclude REGEX      leave out matching names, applied after --contexts
   --context NAME       exactly one context, overriding both
   --where EXPR         filter by live attributes, repeatable, all must match:
@@ -21,7 +22,7 @@ Choosing clusters (on every command):
                        !reachable (contexts only)
 
 Output and failures:
-  -o table|wide|json|yaml|name, --no-headers
+  -o table|wide|json|yaml|name|markdown|html, --no-headers
   --errors             show each failed context and its full error
   --strict             exit non-zero if any context failed
   --parallelism N      contexts queried at once (32; 16 for get)
@@ -75,6 +76,7 @@ point every context at one target or send one cluster's secret to all.
 
 * [kubectl fleet contexts](kubectl_fleet_contexts.md)	 - List kubeconfig contexts, with optional reachability probe
 * [kubectl fleet get](kubectl_fleet_get.md)	 - Get a resource across all matching kubeconfig contexts
+* [kubectl fleet report](kubectl_fleet_report.md)	 - Shareable fleet report: overview plus what needs attention
 * [kubectl fleet status](kubectl_fleet_status.md)	 - Per-cluster health summary across kubeconfig contexts
 * [kubectl fleet version](kubectl_fleet_version.md)	 - Print plugin and per-cluster Kubernetes server versions
 

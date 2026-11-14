@@ -223,13 +223,71 @@ for kubelet and OS values; `-o json` carries everything per cluster. A
 cluster where you can't list nodes or kube-system workloads returns a
 partial result, noted on stderr, instead of failing.
 
+### `kubectl fleet report`
+
+One shareable report for when someone asks "are the prod clusters healthy?"
+or "is everything on 1.30 yet?": a verdict, what needs attention, a fleet
+overview and a row per cluster.
+
+```
+$ kubectl fleet report --contexts '^prod-' --expect-version 1.30
+FLEET REPORT  2026-11-14 10:30 UTC
+Selection: contexts ^prod-; expecting version 1.30; pending counts after 5m
+3 clusters (2 reachable)
+
+3 ITEMS NEED ATTENTION
+  [FAILED]     prod-ap-1  context failed: connection refused
+  [CRASHLOOP]  prod-us-1  2 crashlooping pods (payments(2))
+  [VERSION]    prod-us-1  kubelets not on 1.30: v1.29.8-eks-a737599(1)
+
+FLEET OVERVIEW
+  Nodes                      7 of 7 ready
+  Pods                       20 running, 0 pending (0 stuck), 2 crashlooping, 0 failed, 20 total
+  Control planes (clusters)  v1.30.4-eks-a737599 (2)
+  Kubelets (nodes)           v1.30.4-eks-a737599 (6), v1.29.8-eks-a737599 (1)
+  Zones (nodes)              eu-west-1a (5), eu-west-1b (2)
+  Instance types (nodes)     m7g.large (6)
+  Provisioners (nodes)       karpenter/general (6), nodegroup/system (1)
+
+CLUSTERS
+  CONTEXT    VERSION              KUBELETS       NODES  ZONES  PODS  PENDING  CRASHLOOP  PROVISIONERS
+  prod-ap-1  -                    -              -      -      -     -        -          failed: connection refused
+  prod-eu-1  v1.30.4-eks-a737599  1.30.4         3/3    1      10    0        0          karpenter 3
+  prod-us-1  v1.30.4-eks-a737599  1.29.8-1.30.4  4/4    2      10    0        2          karpenter 3, nodegroup 1
+```
+
+```bash
+kubectl fleet report --contexts '^prod-eu' --contexts '^prod-us'   # named clusters
+kubectl fleet report --expect-version 1.30 -o html > fleet.html    # one self-contained page
+kubectl fleet report -o markdown > fleet.md                        # for a ticket or wiki
+kubectl fleet report -o json                                       # for scripts
+```
+
+Attention items, most severe first: contexts that failed (including any
+`--where reachable` skipped), clusters whose nodes or pods could not be
+listed, NotReady nodes, crashlooping pods, pods Pending longer than
+`--pending-for` (default `5m`), and control planes or kubelets off
+`--expect-version` (`1.30` matches any `1.30.x`). Zones, instance types and
+provisioners (Karpenter NodePool, EKS node group, other) come from standard
+node labels, at no extra API cost.
+
+The text form is plain ASCII, so it pastes into a chat message as a code
+block. The HTML form needs no network and no JavaScript. Failures show as a
+short cause such as `timed out`; server addresses and raw errors never reach
+the report (`--errors` prints them on stderr). Context, namespace, node pool
+and node group names do appear.
+
+Exit codes: `0` all clear, `2` the report lists something that needs
+attention, `1` no report was written. A scheduled job can keep the JSON and
+alert only on `2`.
+
 ## Choosing clusters
 
 Every command takes the same selectors:
 
 | Flag | Selects |
 | ---- | ------- |
-| `--contexts REGEX` | contexts whose name matches (default: all) |
+| `--contexts REGEX` | contexts whose name matches; repeatable, any may match (default: all) |
 | `--exclude REGEX` | leaves out matching names, applied after `--contexts` |
 | `--context NAME` | exactly one context, overriding both |
 | `--where EXPR` | live attributes, repeatable, all must match |
@@ -300,6 +358,8 @@ Every command honours `-o`:
 | `json`    | Machine-readable; shape per command, below.            |
 | `yaml`    | Same data as `json`, YAML-encoded.                     |
 | `name`    | `context/namespace/name` per line, for scripting.      |
+| `markdown` | A Markdown table (`md` also works), for tickets and wikis. |
+| `html`    | One standalone HTML page with the table, no scripts.  |
 
 `json` and `yaml` shapes:
 
@@ -309,6 +369,13 @@ Every command honours `-o`:
   `nodesReady`, `podsCrashLoop`, `topNoisyNamespaces`, ...). A failed context
   has only `context` and `error`.
 - `contexts`, `version`: one object per table row, keyed by column header.
+- `report`: one document with `generatedAt`, `selection`, `summary`,
+  `attention`, `clusters` and `components`. A failed cluster carries only
+  `context` and `error` (the short cause).
+
+`markdown` and `html` show the regular columns, not the wide ones
+(`contexts --check` keeps its probe columns). `report` takes
+`text|markdown|html|json|yaml`, with `text` as its default.
 
 Failed contexts are left out of `get`'s `json`, `yaml` and `name` output and
 reported on stderr instead. `-o name` joins fields with `/`, so it is
