@@ -52,10 +52,11 @@ kubectl fleet status [flags]
       --parallelism int        max contexts queried at once (0=unbounded) (default 32)
       --problems               show only clusters with NotReady nodes or Pending, Failed or crashlooping pods
       --since duration         if set, add RESTARTS_<dur> column counting containers with LastTermination.FinishedAt within window (e.g. 5m, 1h)
+      --skip-unreachable       leave out contexts whose API server cannot be reached, as a skip rather than a failure
       --sort-by string         order clusters: nodes (total), pods (running) or version, largest first; or context, by name
       --strict                 exit non-zero if any context failed
       --top int                keep only the first N clusters after sorting (0 = all)
-      --where stringArray      filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
+      --version stringArray    keep contexts whose server version matches; repeatable, any may match (1.29 = any 1.29.x)
 ```
 
 ### Options inherited from parent commands

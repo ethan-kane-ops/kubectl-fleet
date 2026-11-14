@@ -64,7 +64,7 @@ kubectl fleet --help
 
 Completion covers subcommands, flags, context names (`--context`,
 `--contexts`, `--exclude`), resource kinds and object names for `get`, and
-the values of `-o`, `--sort-by` and `--where`. Kinds and names come from
+the values of `-o` and `--sort-by`. Kinds and names come from
 the clusters themselves, capped at 2.5 seconds: on a large or partly
 unreachable fleet, completion offers what answered in time rather than
 hanging the shell.
@@ -113,7 +113,7 @@ kubectl fleet contexts --check --timeout 3s
 kubectl fleet contexts --contexts '^prod-' --check
 
 # only the contexts that are down, with the cause
-kubectl fleet contexts --where '!reachable'
+kubectl fleet contexts --unreachable
 ```
 
 Sample output:
@@ -265,7 +265,7 @@ kubectl fleet report -o json                                       # for scripts
 ```
 
 Attention items, most severe first: contexts that failed (including any
-`--where reachable` skipped), clusters whose nodes or pods could not be
+`--skip-unreachable` skipped), clusters whose nodes or pods could not be
 listed, NotReady nodes, crashlooping pods, pods Pending longer than
 `--pending-for` (default `5m`), and control planes or kubelets off
 `--expect-version` (`1.30` matches any `1.30.x`). Zones, instance types and
@@ -291,14 +291,17 @@ Every command takes the same selectors:
 | `--contexts REGEX` | contexts whose name matches; repeatable, any may match (default: all) |
 | `--exclude REGEX` | leaves out matching names, applied after `--contexts` |
 | `--context NAME` | exactly one context, overriding both |
-| `--where EXPR` | live attributes, repeatable, all must match |
+| `--version V` | server version matches `V`; repeatable, any may match |
+| `--skip-unreachable` | leaves out clusters that cannot be reached, as a skip rather than a failure |
 
-`--where` understands `version` (`version<1.30`, `version>=1.29.3`; compared
-at the precision you type, vendor suffixes such as `-eks-…` ignored),
-`nodes` (`nodes>50`) and `reachable` / `!reachable`. It costs one quick
-probe per context, and only when used. `reachable` skips unreachable
-contexts without counting them as failures; `!reachable` works only on
-`contexts`, where it lists the dead ones with the cause.
+`--version` compares at the precision you type (`1.29` matches any
+`1.29.x`, `1.29.8` only that patch) and ignores vendor suffixes such as
+`-eks-…`; it is the same rule `report --expect-version` uses. Repeat it for
+several versions: `--version 1.28 --version 1.29`. "Cannot be reached"
+means a network failure (timeout, connection refused, DNS); a cluster that
+answers 401 or 403 is reachable and still counts as failed. Both flags
+cost one quick `/version` call per context, and only when used.
+`contexts --unreachable` lists the clusters that are down, with the cause.
 
 ## Recipes
 
@@ -307,7 +310,7 @@ contexts without counting them as failures; `!reachable` works only on
 kubectl fleet get pods -A --problems --contexts '^prod-'
 
 # Which clusters are still on 1.29, and what runs on them
-kubectl fleet version --detailed --per-cluster --where 'version<1.30'
+kubectl fleet version --detailed --per-cluster --version 1.29
 
 # Kubelet skew and add-on versions across the fleet before an upgrade
 kubectl fleet version --detailed
@@ -316,7 +319,7 @@ kubectl fleet version --detailed
 kubectl fleet status --sort-by nodes --top 10
 
 # Everything except dev and staging, skipping clusters that are down
-kubectl fleet status --exclude '^(dev|stage)-' --where reachable
+kubectl fleet status --exclude '^(dev|stage)-' --skip-unreachable
 
 # What failed, and why
 kubectl fleet status --errors

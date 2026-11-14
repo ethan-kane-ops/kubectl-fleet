@@ -14,7 +14,7 @@ crashlooping, and the kube-system component versions. That is one node
 list and one pod list per cluster.
 
 Needs attention lists, most severe first: contexts that failed (including
-those --where reachable skipped), clusters whose nodes or pods could not be
+those --skip-unreachable skipped), clusters whose nodes or pods could not be
 listed, NotReady nodes, crashlooping pods, pods Pending longer than
 --pending-for, and, with --expect-version, control planes or kubelets on
 another version. Partial kube-system data is listed as information only.
@@ -59,8 +59,8 @@ kubectl fleet report [flags]
   -o, --output string           output format: text|markdown|html|json|yaml (default "text")
       --parallelism int         max contexts queried at once (0=unbounded) (default 32)
       --pending-for duration    a pod Pending at least this long counts as stuck (default 5m0s)
-      --strict                  accepted for consistency; report already exits 2 when any context failed
-      --where stringArray       filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
+      --skip-unreachable        leave out contexts whose API server cannot be reached, as a skip rather than a failure
+      --version stringArray     keep contexts whose server version matches; repeatable, any may match (1.29 = any 1.29.x)
 ```
 
 ### Options inherited from parent commands

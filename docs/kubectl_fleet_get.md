@@ -65,8 +65,9 @@ kubectl fleet get KIND [NAME] [flags]
       --problems               show only unhealthy rows: STATUS not healthy (Running, Completed, Ready, Bound…) or READY short (1/2)
   -l, --selector string        label selector
       --server-print           let each API server render the table columns, as kubectl does; false uses built-in columns (default true)
+      --skip-unreachable       leave out contexts whose API server cannot be reached, as a skip rather than a failure
       --strict                 exit non-zero if any context failed
-      --where stringArray      filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
+      --version stringArray    keep contexts whose server version matches; repeatable, any may match (1.29 = any 1.29.x)
 ```
 
 ### Options inherited from parent commands

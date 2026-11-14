@@ -75,7 +75,7 @@ internal/fleet/              Bounded parallel executor (errgroup with SetLimit)
 internal/k8s/                Typed + dynamic + discovery client factory; GVR resolver
 internal/output/             Table/JSON/YAML printers
 internal/health/             Per-cluster summary used by `status`
-internal/where/              `--where` expressions: version, nodes, reachable
+internal/versions/           Server version parsing and matching (--version, --expect-version)
 internal/inventory/          Version inventory behind `version --detailed`
 internal/printers/           Built-in columns, the fallback behind server-side tables
 docs/                        Generated command reference (see `just docs`)

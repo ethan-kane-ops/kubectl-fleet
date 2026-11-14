@@ -31,7 +31,7 @@ kubectl fleet version [flags]
   kubectl fleet version --detailed
 
   # Kubelet skew and add-on versions per cluster, before an upgrade
-  kubectl fleet version --detailed --per-cluster --where 'version<1.30'
+  kubectl fleet version --detailed --per-cluster --version 1.29
 
   # Only the plugin's own version
   kubectl fleet version --client
@@ -50,8 +50,9 @@ kubectl fleet version [flags]
   -o, --output string          output format: table|wide|json|yaml|name|markdown|html (default "table")
       --parallelism int        max contexts queried at once (0=unbounded) (default 32)
       --per-cluster            with --detailed, one row per context and component instead of the fleet-wide spread
+      --skip-unreachable       leave out contexts whose API server cannot be reached, as a skip rather than a failure
       --strict                 exit non-zero if any context failed (ignored with --client)
-      --where stringArray      filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
+      --version stringArray    keep contexts whose server version matches; repeatable, any may match (1.29 = any 1.29.x)
 ```
 
 ### Options inherited from parent commands

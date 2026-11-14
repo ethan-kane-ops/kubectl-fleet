@@ -17,9 +17,10 @@ Choosing clusters (on every command):
                        (default: all)
   --exclude REGEX      leave out matching names, applied after --contexts
   --context NAME       exactly one context, overriding both
-  --where EXPR         filter by live attributes, repeatable, all must match:
-                       version<1.30, version>=1.29.3, nodes>50, reachable,
-                       !reachable (contexts only)
+  --version V          server version matches V; repeatable, any may match
+                       (1.29 = any 1.29.x, vendor suffixes ignored)
+  --skip-unreachable   leave out clusters that cannot be reached, as a skip
+                       rather than a failure (not on contexts)
 
 Output and failures:
   -o table|wide|json|yaml|name|markdown|html, --no-headers
@@ -45,7 +46,7 @@ point every context at one target or send one cluster's secret to all.
   kubectl fleet get pods -A --problems
 
   # Control planes, kubelets and add-ons still on 1.29
-  kubectl fleet version --detailed --where 'version<1.30'
+  kubectl fleet version --detailed --version 1.29
 ```
 
 ### Options

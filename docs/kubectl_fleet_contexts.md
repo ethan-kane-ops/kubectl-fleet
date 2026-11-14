@@ -11,8 +11,8 @@ every context (each with its own --timeout) and adds REACHABLE, VERSION,
 LATENCY and ERROR columns. Unlike the other commands, contexts keeps a row
 for every context it could not reach, since reachability is its subject.
 
---where works here too, and only here accepts '!reachable', to list the
-contexts that are down along with why.
+--unreachable probes like --check and lists only the contexts that are
+down, along with why.
 
 ```
 kubectl fleet contexts [flags]
@@ -28,7 +28,7 @@ kubectl fleet contexts [flags]
   kubectl fleet contexts --check --timeout 2s
 
   # Just the ones that are down, with the cause
-  kubectl fleet contexts --where '!reachable'
+  kubectl fleet contexts --unreachable
 
   # CI gate: fail if any production context is unreachable
   kubectl fleet contexts --contexts '^prod-' --check --strict
@@ -46,7 +46,8 @@ kubectl fleet contexts [flags]
       --parallelism int        max contexts probed at once (0=unbounded) (default 32)
       --strict                 exit non-zero if any probed context is unreachable (requires --check)
       --timeout duration       per-context probe timeout (default 5s)
-      --where stringArray      filter contexts by live attributes; repeatable, all must match: version<1.30, nodes>=50, reachable, !reachable
+      --unreachable            list only contexts whose API server cannot be reached, with the cause; implies --check
+      --version stringArray    keep contexts whose server version matches; repeatable, any may match (1.29 = any 1.29.x)
 ```
 
 ### Options inherited from parent commands
