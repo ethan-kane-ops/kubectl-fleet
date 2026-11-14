@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// TestE2E_Selection covers --exclude and --where against real API servers
-// (kind runs a current Kubernetes, so version>=1.30 matches both clusters).
+// TestE2E_Selection covers --exclude, --version and --skip-unreachable
+// against real API servers. Version matching itself is unit-tested.
 func TestE2E_Selection(t *testing.T) {
 	mixed := mixedKubeconfig(t)
 	cases := []struct {
@@ -23,13 +23,11 @@ func TestE2E_Selection(t *testing.T) {
 	}{
 		{name: "exclude", args: []string{"status", "--exclude", contextB},
 			want: []string{contextA}, notWant: []string{contextB}},
-		{name: "where version matches both", args: []string{"status", "--where", "reachable", "--where", "version>=1.30"},
+		{name: "skip-unreachable keeps both", args: []string{"status", "--skip-unreachable"},
 			want: []string{contextA, contextB}, wantStderr: "skipped 1 unreachable"},
-		{name: "where version matches none", args: []string{"status", "--where", "reachable", "--where", "version<1.20"},
+		{name: "version matches none", args: []string{"status", "--skip-unreachable", "--version", "1.20"},
 			wantCode: 1, wantStderr: "no matching contexts"},
-		{name: "where nodes", args: []string{"status", "--where", "reachable", "--where", "nodes>=1"},
-			want: []string{contextA, contextB}},
-		{name: "unreachable listed by contexts", args: []string{"contexts", "--where", "!reachable"},
+		{name: "unreachable listed by contexts", args: []string{"contexts", "--unreachable"},
 			want: []string{"kind-fleet-e2e-unreachable"}, notWant: []string{contextA}},
 		{name: "brief error summary", args: []string{"version"},
 			want: []string{contextA, contextB}, notWant: []string{"<error>"},
