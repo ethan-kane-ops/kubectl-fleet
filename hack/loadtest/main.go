@@ -618,8 +618,6 @@ const podColumns = `[{"name":"Name","type":"string","priority":0},{"name":"Ready
 	`{"name":"Node","type":"string","priority":1},{"name":"Nominated Node","type":"string","priority":1},` +
 	`{"name":"Readiness Gates","type":"string","priority":1}]`
 
-// podObject is a pod shaped like a typical Deployment replica (~2 KB JSON).
-// A crashlooping pod has its app container waiting in CrashLoopBackOff.
 // hexID is a deterministic, incompressible hex string for pod i: uids and
 // container and image digests are what keep real pod lists from
 // compressing to nothing.
@@ -632,6 +630,9 @@ func hexID(i int, kind string, n int) string {
 	return b.String()[:n]
 }
 
+// podObject is a pod shaped like a typical Deployment replica, with the
+// per-pod IDs and managedFields real pods carry. A crashlooping pod has its
+// app container waiting in CrashLoopBackOff.
 func podObject(i, nodes int, crashloop bool) map[string]any {
 	ns := fmt.Sprintf("team-%d", i%50)
 	hash := hexID(i, "hash", 5)

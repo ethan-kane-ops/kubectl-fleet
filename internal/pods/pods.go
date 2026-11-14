@@ -1,6 +1,11 @@
 // Package pods counts a cluster's pods for `status` and `report` from four
 // phase-filtered lists, so the bulk of a cluster (its Running pods) costs a
 // cells-only table row each, tens of bytes on the wire, not a full object.
+//
+// Accepted gaps, fine for triage: the four lists are read at slightly
+// different moments, so a pod changing phase between them can be counted
+// twice or missed; and a Running pod's crashloop is judged from its table
+// row, which shows one container's state and the pod's total restarts.
 package pods
 
 import (
@@ -65,7 +70,7 @@ func Count(ctx context.Context, src Source, opts Options) (Counts, error) {
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return wrap("running", countRunning(ctx, src, opts, &running)) })
 	g.Go(func() error { return wrap("pending", countPending(ctx, src, opts, &pending)) })
-	g.Go(func() error { return wrap("failed", countFailed(ctx, src, &failed)) })
+	g.Go(func() error { return wrap("failed", countFailed(ctx, src, opts, &failed)) })
 	g.Go(func() error { return wrap("other", countOther(ctx, src, &other)) })
 	if err := g.Wait(); err != nil {
 		return Counts{}, err
@@ -76,7 +81,7 @@ func Count(ctx context.Context, src Source, opts Options) (Counts, error) {
 		StuckPending:      pending.StuckPending,
 		Failed:            failed.Failed,
 		CrashLoop:         running.CrashLoop + pending.CrashLoop + failed.CrashLoop,
-		RestartedInWindow: running.RestartedInWindow,
+		RestartedInWindow: running.RestartedInWindow + pending.RestartedInWindow + failed.RestartedInWindow,
 		StuckPendingNS:    pending.StuckPendingNS,
 		NoisyNS:           pending.NoisyNS,
 	}
@@ -100,20 +105,21 @@ func wrap(list string, err error) error {
 	return fmt.Errorf("list %s pods: %w", list, err)
 }
 
+// addRestarts counts p's containers restarted within opts.Since, when set.
+func addRestarts(c *Counts, p *corev1.Pod, opts Options) {
+	if opts.Since > 0 {
+		c.RestartedInWindow += RestartsInWindow(p, opts.Now.Add(-opts.Since))
+	}
+}
+
 func countRunning(ctx context.Context, src Source, opts Options, c *Counts) error {
 	full := func() error {
-		var cutoff time.Time
-		if opts.Since > 0 {
-			cutoff = opts.Now.Add(-opts.Since)
-		}
 		return src.Pods(ctx, SelectRunning, func(p *corev1.Pod) error {
 			c.Running++
 			if IsCrashLoop(p) {
 				c.CrashLoop++
 			}
-			if !cutoff.IsZero() {
-				c.RestartedInWindow += RestartsInWindow(p, cutoff)
-			}
+			addRestarts(c, p, opts)
 			return nil
 		})
 	}
@@ -148,11 +154,12 @@ func countPending(ctx context.Context, src Source, opts Options, c *Counts) erro
 		if IsCrashLoop(p) {
 			c.CrashLoop++
 		}
+		addRestarts(c, p, opts)
 		return nil
 	})
 }
 
-func countFailed(ctx context.Context, src Source, c *Counts) error {
+func countFailed(ctx context.Context, src Source, opts Options, c *Counts) error {
 	c.NoisyNS = map[string]int{}
 	return src.Pods(ctx, SelectFailed, func(p *corev1.Pod) error {
 		c.Failed++
@@ -160,6 +167,7 @@ func countFailed(ctx context.Context, src Source, c *Counts) error {
 		if IsCrashLoop(p) {
 			c.CrashLoop++
 		}
+		addRestarts(c, p, opts)
 		return nil
 	})
 }

@@ -10,8 +10,10 @@ items that need attention, a fleet overview and a row per cluster.
 The report collects, per cluster, the control-plane and kubelet versions,
 nodes ready/total, zones, instance types, how nodes are provisioned
 (Karpenter NodePool, EKS node group or other), pods running, pending and
-crashlooping, and the kube-system component versions. That is one node
-list and one pod list per cluster.
+crashlooping, and the kube-system component versions. Pods are read as
+four lists by phase: Running pods as compact table rows, Pending and
+Failed pods in full. Crashlooping pods are counted, not placed in a
+namespace.
 
 Needs attention lists, most severe first: contexts that failed (including
 those --skip-unreachable skipped), clusters whose nodes or pods could not be
