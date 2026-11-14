@@ -182,9 +182,9 @@ func (c Counter) Sorted() []Count {
 
 // SpreadRow is one component version and how many clusters run it.
 type SpreadRow struct {
-	Component string
-	Version   string
-	Clusters  int
+	Component string `json:"component"`
+	Version   string `json:"version"`
+	Clusters  int    `json:"clusters"`
 }
 
 // Spread summarises a fleet: per component, each version and the number of
