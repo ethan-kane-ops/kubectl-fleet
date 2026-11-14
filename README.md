@@ -328,7 +328,25 @@ kubectl fleet get deploy api -A
 ## Large fleets
 
 kubectl-fleet is load-tested at 200 contexts (20 of them unreachable) and
-at 20 clusters of 10,000 pods each (`just loadtest`).
+at 20 clusters of 10,000 pods each (`just loadtest`). An opt-in suite
+mimics a large EKS fleet from a laptop: 300 clusters of 5,000 pods and 60
+nodes, 80 ms per request, TLS, and one exec credential plugin per cluster
+burning 400 ms of CPU like `aws eks get-token`
+(`just loadtest -suite work`, add `-bandwidth 25` to cap the link at
+25 MB/s). On an M-series laptop:
+
+| Command | Uncapped | 25 MB/s link |
+| ------- | -------- | ------------ |
+| `contexts --check`, `version` | 5 s | 5 s |
+| `version --detailed` | 7 s | 8 s |
+| `status`, `report` | 16 to 18 s | 124 s |
+| `report --parallelism 96` | 12 s | 124 s |
+| `get pods -A --problems` | 29 s | 44 s |
+
+`status` and `report` read every pod in full (about 3 GB for 1.5 million
+pods here), so on a slow link they are bound by bandwidth, and more
+parallelism does not help. Exec credential plugins cost about 4 s per 300
+clusters at the default parallelism.
 
 - **Parallelism.** `--parallelism` (default 32, 16 for `get`) caps how many
   contexts are queried at once. Each API server only ever sees its own
