@@ -60,7 +60,7 @@ func (o *fleetOptions) addErrorsFlag(c *cobra.Command) {
 func (o *fleetOptions) finish(w io.Writer, sel selection, work []fleet.Failure, attempted int) error {
 	failures := append(append([]fleet.Failure(nil), sel.failures...), work...)
 	total := attempted + len(sel.failures)
-	reportFailures(w, total, failures, sel.skippedUnreachable, o.errors)
+	reportFailures(w, total, failures, len(sel.skipped), o.errors)
 	switch {
 	case total > 0 && len(failures) == total:
 		// Nothing could be queried: an empty result would be
@@ -118,7 +118,8 @@ type probeResult struct {
 type selection struct {
 	refs               []kubeconfig.ContextRef
 	failures           []fleet.Failure
-	skippedUnreachable int
+	// skipped names the unreachable contexts --where reachable left out.
+	skipped []string
 	// probes holds the --where probe per context name; nil without --where.
 	probes map[string]probeResult
 }
@@ -170,7 +171,7 @@ func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericcli
 				sel.refs = append(sel.refs, ref)
 			}
 		case unreachable && filter.Reachability() == where.ReachOnly:
-			sel.skippedUnreachable++
+			sel.skipped = append(sel.skipped, ref.Name)
 		case p.err != nil:
 			sel.failures = append(sel.failures, fleet.Failure{Context: ref.Name, Err: p.err})
 		case filter.Match(p.attrs):
@@ -181,7 +182,7 @@ func (o *fleetOptions) selectContexts(ctx context.Context, kubeFlags *genericcli
 	case len(sel.refs) > 0 || len(sel.failures) > 0, filter.Reachability() == where.UnreachableOnly:
 		// For !reachable an empty selection is an answer: nothing is down.
 		return sel, nil
-	case sel.skippedUnreachable == len(refs):
+	case len(sel.skipped) == len(refs):
 		return selection{}, fmt.Errorf("all %d selected contexts are unreachable (skipped by --where reachable)", len(refs))
 	}
 	return selection{}, fmt.Errorf("no matching contexts: --where excluded all %d", len(refs))
