@@ -42,15 +42,17 @@ clean:
 
 # Version metadata stamped by `just install`, as goreleaser stamps releases:
 # `git describe` gives v0.4.0 on a tag, v0.4.0-3-gabc1234 after it, -dirty
-# with local changes.
+# with local changes; dev and none outside a git checkout.
 buildinfo := "github.com/ethan-kane-ops/kubectl-fleet/internal/buildinfo"
+version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
+commit := `git rev-parse --short HEAD 2>/dev/null || echo none`
 
 # Install binary via `go install` so kubectl discovers it on PATH
 install:
-    go install -ldflags "-X {{buildinfo}}.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -X {{buildinfo}}.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo none) -X {{buildinfo}}.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/kubectl-fleet
-    mise reshim 2>/dev/null || true
-    install -m 0755 hack/kubectl_complete-fleet "$(dirname "$(command -v kubectl-fleet)")/kubectl_complete-fleet"
-    @echo "installed → $(command -v kubectl-fleet) (+ kubectl_complete-fleet for kubectl fleet <TAB>)"
+    @go install -ldflags "-X {{buildinfo}}.Version={{version}} -X {{buildinfo}}.Commit={{commit}} -X {{buildinfo}}.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/kubectl-fleet
+    @mise reshim 2>/dev/null || true
+    @install -m 0755 hack/kubectl_complete-fleet "$(dirname "$(command -v kubectl-fleet)")/kubectl_complete-fleet"
+    @echo "installed {{version}} → $(command -v kubectl-fleet) (+ kubectl_complete-fleet for kubectl fleet <TAB>)"
 
 # Regenerate command reference docs into ./docs
 docs:
